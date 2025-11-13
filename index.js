@@ -63,10 +63,10 @@ async function searchAddress(input) {
   // 🔥 여기부터 “직접 계산”하는 부분
   const admCd = juso.admCd; // 예: '1168010500'
   const sigunguCd = admCd.substring(0, 5); // 11680
-  const bjdongCd  = admCd.substring(5, 10); // 10500
+  const bjdongCd = admCd.substring(5, 10); // 10500
 
-  const bun = String(juso.lnbrMnnm || "").padStart(4, "0");  // 157 → 0157
-  const ji  = String(juso.lnbrSlno || "").padStart(4, "0");  // 37  → 0037
+  const bun = String(juso.lnbrMnnm || "").padStart(4, "0"); // 157 → 0157
+  const ji = String(juso.lnbrSlno || "").padStart(4, "0"); // 37  → 0037
 
   const jibun = `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`;
   const roadAddr = juso.roadAddr;
@@ -141,7 +141,7 @@ async function fetchBuildingRegister(addressInfo) {
   return { items };
 }
 
-// 6. 요약(summary) 만드는 함수
+// 6. 요약(summary) 한글로 만드는 함수
 function buildSummary(items) {
   const apt = items.filter(
     (it) =>
@@ -167,71 +167,47 @@ function buildSummary(items) {
       )
   );
 
-  const totalCount = items.length;
-  const aptDongCount = apt.length;
-  const commercialDongCount = commercial.length;
-  const subDongCount = subBuildings.length;
+  // 요약 숫자들
+  const 총건물수 = items.length;
+  const 아파트동수 = apt.length;
+  const 상가동수 = commercial.length;
+  const 부속건물수 = subBuildings.length;
 
-  const totalHousehold = items.reduce(
+  const 총세대수 = items.reduce(
     (sum, it) => sum + (Number(it.hhldCnt) || 0),
     0
   );
 
-  const aptDongList = apt.map((it) => it.dongNm);
+  const 아파트동목록 = apt.map((it) => it.dongNm);
+
+  // 상세 정보 → 한글 필드 매핑
+  const mapToKorean = (it) => ({
+    동이름: it.dongNm,
+    건물구분: it.mainAtchGbCdNm,
+    주용도: it.mainPurpsCdNm,
+    기타용도: it.etcPurps,
+    연면적_m2: Number(it.totArea),
+    지상층수: Number(it.grndFlrCnt),
+    지하층수: Number(it.ugrndFlrCnt),
+    세대수: Number(it.hhldCnt),
+    지붕구조: it.roofCdNm,
+    주구조: it.strctCdNm,
+    사용승인일: it.useAprDay,
+    비상용승강기수: Number(it.emgenUseElvtCnt),
+    승객용승강기수: Number(it.rideUseElvtCnt),
+  });
 
   return {
-    totalCount,
-    aptDongCount,
-    commercialDongCount,
-    subDongCount,
-    totalHousehold,
-    hasCommercial: commercial.length > 0,
-    aptDongList,
-    apt: apt.map((it) => ({
-      dongNm: it.dongNm,
-      mainAtchGbCdNm: it.mainAtchGbCdNm,
-      mainPurpsCdNm: it.mainPurpsCdNm,
-      etcPurps: it.etcPurps,
-      totArea: Number(it.totArea),
-      grndFlrCnt: Number(it.grndFlrCnt),
-      ugrndFlrCnt: Number(it.ugrndFlrCnt),
-      hhldCnt: Number(it.hhldCnt),
-      roofCdNm: it.roofCdNm,
-      strctCdNm: it.strctCdNm,
-      useAprDay: it.useAprDay,
-      emgenUseElvtCnt: Number(it.emgenUseElvtCnt),
-      rideUseElvtCnt: Number(it.rideUseElvtCnt),
-    })),
-    commercial: commercial.map((it) => ({
-      dongNm: it.dongNm,
-      mainAtchGbCdNm: it.mainAtchGbCdNm,
-      mainPurpsCdNm: it.mainPurpsCdNm,
-      etcPurps: it.etcPurps,
-      totArea: Number(it.totArea),
-      grndFlrCnt: Number(it.grndFlrCnt),
-      ugrndFlrCnt: Number(it.ugrndFlrCnt),
-      hhldCnt: Number(it.hhldCnt),
-      roofCdNm: it.roofCdNm,
-      strctCdNm: it.strctCdNm,
-      useAprDay: it.useAprDay,
-      emgenUseElvtCnt: Number(it.emgenUseElvtCnt),
-      rideUseElvtCnt: Number(it.rideUseElvtCnt),
-    })),
-    subBuildings: subBuildings.map((it) => ({
-      dongNm: it.dongNm,
-      mainAtchGbCdNm: it.mainAtchGbCdNm,
-      mainPurpsCdNm: it.mainPurpsCdNm,
-      etcPurps: it.etcPurps,
-      totArea: Number(it.totArea),
-      grndFlrCnt: Number(it.grndFlrCnt),
-      ugrndFlrCnt: Number(it.ugrndFlrCnt),
-      hhldCnt: Number(it.hhldCnt),
-      roofCdNm: it.roofCdNm,
-      strctCdNm: it.strctCdNm,
-      useAprDay: it.useAprDay,
-      emgenUseElvtCnt: Number(it.emgenUseElvtCnt),
-      rideUseElvtCnt: Number(it.rideUseElvtCnt),
-    })),
+    총건물수,
+    아파트동수,
+    상가동수,
+    부속건물수,
+    총세대수,
+    상가존재: commercial.length > 0,
+    아파트동목록,
+    아파트: apt.map(mapToKorean),
+    상가: commercial.map(mapToKorean),
+    부속건물: subBuildings.map(mapToKorean),
   };
 }
 
@@ -299,4 +275,3 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
-
