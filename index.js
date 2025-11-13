@@ -1,29 +1,35 @@
 // index.js
-// package.json 에서는 "type": "module" 빼고(CommonJS) 사용
+// package.json 에서는 "type": "module" 빼고(CommonJS) 사용한다고 가정
 
 const express = require("express");
+const path = require("path"); // ✅ 추가
 require("dotenv").config();
 
-// node-fetch v3 (ESM 전용) CommonJS에서 쓰는 트릭
+// 🔥 node-fetch v3 (ESM 전용)를 CommonJS에서 쓰는 방법
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000; // ✅ Render용 포트도 고려
 
-app.listen(PORT, () => {
-  console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
-});
+// ✅ 환경변수에서 서비스키 읽기 (공공데이터포털 키)
+const JUSO_API_KEY = process.env.JUSO_API_KEY || process.env.JUSO_KEY || "여기에_주소검색_API_KEY";
+const BLD_API_KEY =
+  process.env.BLD_API_KEY || process.env.MOLIT_KEY || "여기에_건축물대장_API_KEY";
 
-// 🔑 .env 에 정의된 키 사용
-const JUSO_KEY = process.env.JUSO_KEY;
-const MOLIT_KEY = process.env.MOLIT_KEY;
-
-if (!JUSO_KEY || !MOLIT_KEY) {
-  console.warn("⚠️ JUSO_KEY 또는 MOLIT_KEY 환경변수가 설정되지 않았습니다.");
+// ⚠️ 환경변수 체크 (서버 로그용)
+if (!JUSO_API_KEY || JUSO_API_KEY.startsWith("여기에_")) {
+  console.warn("⚠️ JUSO_API_KEY / JUSO_KEY 환경변수가 설정되지 않았습니다.");
+}
+if (!BLD_API_KEY || BLD_API_KEY.startsWith("여기에_")) {
+  console.warn("⚠️ BLD_API_KEY / MOLIT_KEY 환경변수가 설정되지 않았습니다.");
 }
 
+// JSON 바디 파싱
 app.use(express.json());
+
+// ✅ 정적 파일 제공 (public 폴더)
+app.use(express.static(path.join(__dirname, "public")));
 
 /**
  * 1. 주소 → 지번/코드 조회 (도로명주소 API)
@@ -32,7 +38,7 @@ async function searchAddress(input) {
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
 
   const params = {
-    confmKey: JUSO_KEY,
+    confmKey: JUSO_API_KEY,
     currentPage: "1",
     countPerPage: "5",
     keyword: input,
@@ -63,27 +69,10 @@ async function searchAddress(input) {
     throw new Error("검색 결과가 없습니다.");
   }
 
-  // 🔥 여기부터가 핵심 수정 부분
-  const admCd = juso.admCd; // 예: 4163011400
-  const sigunguCd =
-    juso.sigunguCd || (admCd ? admCd.substring(0, 5) : undefined);
-  const bjdongCd =
-    juso.bjdongCd || (admCd ? admCd.substring(5, 10) : undefined);
-
-  const bun =
-    juso.bun ||
-    (juso.lnbrMnnm ? String(juso.lnbrMnnm).padStart(4, "0") : undefined);
-  const ji =
-    juso.ji ||
-    (juso.lnbrSlno ? String(juso.lnbrSlno).padStart(4, "0") : "0000");
-
-  if (!sigunguCd || !bjdongCd || !bun || !ji) {
-    console.error("❌ JUSO 응답:", juso);
-    throw new Error(
-      "주소에서 건축물대장 조회에 필요한 코드(sigunguCd, bjdongCd, bun, ji)를 찾지 못했습니다."
-    );
-  }
-
+  const sigunguCd = juso.sigunguCd;
+  const bjdongCd = juso.bjdongCd;
+  const bun = juso.bun;
+  const ji = juso.ji;
   const jibun = `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`;
   const roadAddr = juso.roadAddr;
 
@@ -104,13 +93,12 @@ async function searchAddress(input) {
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
 
-  // 🔥 엔드포인트 교체!!
   const url = new URL(
-    "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+    "https://apis.data.go.kr/1613000/BldRgstService_v2/getBrTitleInfo"
   );
 
   const params = {
-    serviceKey: MOLIT_KEY,
+    serviceKey: BLD_API_KEY,
     sigunguCd,
     bjdongCd,
     platGbCd: "0",
@@ -127,14 +115,18 @@ async function fetchBuildingRegister(addressInfo) {
 
   const res = await fetch(url.toString(), { method: "GET" });
 
-  const rawText = await res.text();
-  console.log("📦 건축물대장 RAW 응답:", rawText);
+  if (!res.ok) {
+    throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
+  }
 
+  // 일부 경우 API가 JSON 대신 에러 텍스트를 줄 수 있어서 방어코드
   let data;
   try {
-    data = JSON.parse(rawText);
+    data = await res.json();
   } catch (e) {
-    throw new Error(`건축물대장 JSON 파싱 실패 → ${rawText}`);
+    const text = await res.text();
+    console.error("건축물대장 JSON 파싱 실패, 응답 텍스트:", text);
+    throw new Error("건축물대장 JSON 파싱 실패 → " + text);
   }
 
   const header = data.response?.header;
@@ -144,17 +136,13 @@ async function fetchBuildingRegister(addressInfo) {
     );
   }
 
-  let items = data.response?.body?.items?.item;
-  if (!items) {
+  const items = data.response?.body?.items?.item;
+  if (!items || items.length === 0) {
     throw new Error("건축물대장 조회 결과가 없습니다.");
-  }
-  if (!Array.isArray(items)) {
-    items = [items];
   }
 
   return { items };
 }
-
 
 /**
  * 3. 요약(summary) 생성
@@ -171,8 +159,7 @@ function buildSummary(items) {
   const commercial = items.filter(
     (it) =>
       it.mainPurpsCdNm === "제2종근린생활시설" ||
-      (typeof it.etcPurps === "string" &&
-        it.etcPurps.includes("근린생활시설"))
+      (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
 
   const subBuildings = items.filter(
@@ -254,7 +241,16 @@ function buildSummary(items) {
 }
 
 /**
+ * ✅ 메인 페이지: GET /
+ *  → public/index.html을 보여줌
+ */
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+/**
  * POST /summary
+ * body: { "input": "주소" }
  */
 app.post("/summary", async (req, res) => {
   try {
@@ -282,7 +278,8 @@ app.post("/summary", async (req, res) => {
 });
 
 /**
- * GET /summary?addr=주소  (브라우저용)
+ * GET /summary?addr=주소
+ * → 브라우저 테스트용
  */
 app.get("/summary", async (req, res) => {
   try {
