@@ -91,7 +91,7 @@ async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
 
   const url = new URL(
-    "https://apis.data.go.kr/1613000/BldRgstService_v2/getBrTitleInfo"
+    "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
   );
 
   const params = {
@@ -299,3 +299,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
