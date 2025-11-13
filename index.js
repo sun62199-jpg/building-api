@@ -13,15 +13,15 @@ const app = express();
 const PORT = process.env.PORT || 3000; // ✅ Render용 포트도 고려
 
 // ✅ 환경변수에서 서비스키 읽기 (공공데이터포털 키)
-const JUSO_API_KEY = process.env.JUSO_API_KEY || process.env.JUSO_KEY || "여기에_주소검색_API_KEY";
-const BLD_API_KEY =
-  process.env.BLD_API_KEY || process.env.MOLIT_KEY || "여기에_건축물대장_API_KEY";
+const JUSO_KEY = process.env.JUSO_KEY || process.env.JUSO_KEY || "여기에_주소검색_API_KEY";
+const MOLIT_KEY =
+  process.env.MOLIT_KEY || process.env.MOLIT_KEY || "여기에_건축물대장_API_KEY";
 
 // ⚠️ 환경변수 체크 (서버 로그용)
-if (!JUSO_API_KEY || JUSO_API_KEY.startsWith("여기에_")) {
+if (!JUSO_KEY || JUSO_KEY.startsWith("여기에_")) {
   console.warn("⚠️ JUSO_API_KEY / JUSO_KEY 환경변수가 설정되지 않았습니다.");
 }
-if (!BLD_API_KEY || BLD_API_KEY.startsWith("여기에_")) {
+if (!MOLIT_KEY || MOLIT_KEY.startsWith("여기에_")) {
   console.warn("⚠️ BLD_API_KEY / MOLIT_KEY 환경변수가 설정되지 않았습니다.");
 }
 
@@ -310,4 +310,5 @@ app.get("/summary", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
 
