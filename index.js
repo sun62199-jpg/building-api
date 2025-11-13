@@ -31,7 +31,7 @@ async function searchAddress(input) {
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
 
   const params = {
-    confmKey: JUSO_KEY,
+    confmKey: process.env.JUSO_KEY,
     currentPage: "1",
     countPerPage: "5",
     keyword: input,
@@ -43,7 +43,6 @@ async function searchAddress(input) {
   console.log("📡 JUSO API 요청:", url.toString());
 
   const res = await fetch(url.toString(), { method: "GET" });
-
   if (!res.ok) {
     throw new Error(`주소 검색 API 오류: HTTP ${res.status}`);
   }
@@ -52,9 +51,7 @@ async function searchAddress(input) {
 
   if (!data.results || data.results.common.errorCode !== "0") {
     throw new Error(
-      `주소 검색 실패: ${
-        data.results?.common?.errorMessage || "알 수 없는 오류"
-      }`
+      `주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`
     );
   }
 
@@ -63,14 +60,18 @@ async function searchAddress(input) {
     throw new Error("검색 결과가 없습니다.");
   }
 
-  const sigunguCd = juso.sigunguCd;
-  const bjdongCd = juso.bjdongCd;
-  const bun = juso.bun;
-  const ji = juso.ji;
+  // 🔥 여기부터 “직접 계산”하는 부분
+  const admCd = juso.admCd; // 예: '1168010500'
+  const sigunguCd = admCd.substring(0, 5); // 11680
+  const bjdongCd  = admCd.substring(5, 10); // 10500
+
+  const bun = String(juso.lnbrMnnm || "").padStart(4, "0");  // 157 → 0157
+  const ji  = String(juso.lnbrSlno || "").padStart(4, "0");  // 37  → 0037
+
   const jibun = `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`;
   const roadAddr = juso.roadAddr;
 
-  return {
+  const addressInfo = {
     sigunguCd,
     bjdongCd,
     bun,
@@ -79,23 +80,25 @@ async function searchAddress(input) {
     roadAddr,
     rawJuso: juso,
   };
+
+  console.log("🏠 addressInfo:", addressInfo);
+
+  return addressInfo;
 }
 
 // 5. 건축물대장(표제부) 조회 + 디버그 강화
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
 
-  console.log("🏠 addressInfo:", addressInfo);
-
   const url = new URL(
     "https://apis.data.go.kr/1613000/BldRgstService_v2/getBrTitleInfo"
   );
 
   const params = {
-    serviceKey: MOLIT_KEY,
+    serviceKey: process.env.MOLIT_KEY,
     sigunguCd,
     bjdongCd,
-    platGbCd: "0",
+    platGbCd: "0", // 산이면 나중에 addressInfo에서 넘기도록
     bun,
     ji,
     numOfRows: "100",
@@ -108,24 +111,19 @@ async function fetchBuildingRegister(addressInfo) {
   console.log("📡 건축물대장 API 요청:", url.toString());
 
   const res = await fetch(url.toString(), { method: "GET" });
-  const rawText = await res.text();
 
-  console.log("📦 건축물대장 RAW 응답 앞부분:", rawText.slice(0, 300));
+  const text = await res.text();
+  console.log("📦 건축물대장 RAW 응답 앞부분:", text.slice(0, 200));
 
   if (!res.ok) {
-    throw new Error(
-      `건축물대장 API 오류: HTTP ${res.status} / BODY: ${rawText.slice(
-        0,
-        100
-      )}`
-    );
+    throw new Error(`건축물대장 API 오류: HTTP ${res.status} / BODY: ${text}`);
   }
 
   let data;
   try {
-    data = JSON.parse(rawText);
+    data = JSON.parse(text);
   } catch (e) {
-    throw new Error(`건축물대장 JSON 파싱 실패 → ${rawText.slice(0, 100)}`);
+    throw new Error("건축물대장 JSON 파싱 실패 → " + text);
   }
 
   const header = data.response?.header;
