@@ -38,7 +38,7 @@ async function searchAddress(input) {
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
 
   const params = {
-    confmKey: JUSO_API_KEY,
+    confmKey: JUSO_KEY,
     currentPage: "1",
     countPerPage: "5",
     keyword: input,
@@ -98,7 +98,7 @@ async function fetchBuildingRegister(addressInfo) {
   );
 
   const params = {
-    serviceKey: BLD_API_KEY,
+    serviceKey: MOLIT_KEY,
     sigunguCd,
     bjdongCd,
     platGbCd: "0",
@@ -310,3 +310,4 @@ app.get("/summary", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
