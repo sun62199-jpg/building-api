@@ -11,7 +11,7 @@
   </style>
 </head>
 <body>
-  <h1>건축물 요약 조회 - 양주출장소 김영선</h1>
+  <h1>건축물 다중이용 여부 조회 - 양주출장소 김영선</h1>
 
   <input id="addr" placeholder="주소를 입력하세요 (예: 경기도 양주시 옥정서로 254)" />
   <button onclick="search()">조회</button>
@@ -22,16 +22,27 @@
     async function search() {
       const addr = document.getElementById("addr").value;
       const resultBox = document.getElementById("result");
-
       resultBox.innerHTML = "조회 중...";
 
-      const res = await fetch(`/summary?addr=${encodeURIComponent(addr)}`);
-      const data = await res.json();
+      try {
+        const res = await fetch(`/summary?addr=${encodeURIComponent(addr)}`);
+        const data = await res.json();
 
-      resultBox.innerHTML = JSON.stringify(data, null, 2);
+        if (data.error) {
+          resultBox.innerHTML = `❌ 오류: ${data.error}\n${data.detail || ""}`;
+          return;
+        }
+
+        // 다중이용건축물 여부와 판단 근거만 표시
+        resultBox.innerHTML = `
+주소: ${data.주소}
+다중이용건축물: ${data.다중이용건축물 ? "✅ 예" : "❌ 아니오"}
+판단 근거: ${data.판단이유}
+        `;
+      } catch (err) {
+        resultBox.innerHTML = `❌ 조회 실패: ${err}`;
+      }
     }
   </script>
 </body>
 </html>
-
-
