@@ -199,6 +199,7 @@ function isMultiUseBuilding(summary) {
 }
 
 // 8. API 라우트 (/summary)
+// 8. API 라우트 (/summary) - 다중이용건축물 판단만 반환
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -209,10 +210,11 @@ app.get("/summary", async (req, res) => {
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
 
+    // summary 제거하고 다중이용건축물 정보만 반환
     res.json({
       주소: input,
-      요약: summary,
-      다중이용건축물판단: multiUse,
+      다중이용건축물: multiUse.다중이용건축물,
+      판단이유: multiUse.판단이유,
     });
   } catch (err) {
     console.error(err);
@@ -229,3 +231,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
