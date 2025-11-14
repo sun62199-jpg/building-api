@@ -146,15 +146,19 @@ function buildSummary(items) {
 function isMultiUseBuilding(summary) {
   const multiUseAreaThreshold = 5000;
 
+  const 아파트 = summary.아파트 || [];
+  const 상업 = summary.상업 || [];
+  const 부속건물 = summary.부속건물 || [];
+
   // 가목: 특정 용도 + 연면적 5천 이상
-  const 가목대상 = summary.아파트.concat(summary.상업).concat(summary.부속건물)
+  const 가목대상 = 아파트.concat(상업).concat(부속건물)
     .filter(it =>
       ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
         .some(u => it.용도.includes(u)) && it.연면적 >= multiUseAreaThreshold
     );
 
-  // 나목: 지상층 16층 이상만 체크 (연면적 무시)
-  const 나목대상 = summary.아파트.concat(summary.상업).concat(summary.부속건물)
+  // 나목: 지상층 16층 이상
+  const 나목대상 = 아파트.concat(상업).concat(부속건물)
     .filter(it => it.지상층 >= 16);
 
   const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
@@ -199,5 +203,6 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
 
 
