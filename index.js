@@ -1,5 +1,3 @@
-// index.js (CommonJS 버전)
-
 // 1. 기본 세팅
 const express = require("express");
 const path = require("path");
@@ -191,4 +189,14 @@ app.get("/summary", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "조회 실패", detail: String(err) });
   }
+});
+
+// 루트
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// 서버 시작
+app.listen(PORT, () => {
+  console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
