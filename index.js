@@ -102,58 +102,69 @@ async function fetchBuildingRegister(addressInfo) {
   return items;
 }
 
-// 6. 한글화 & 연면적 포함
+// 6. 한글화 & 요약 (기타 용도 통합 필터링)
 function buildSummary(items) {
-  const 아파트 = items.filter(it =>
-    it.mainPurpsCdNm === "공동주택" &&
-    typeof it.etcPurps === "string" &&
-    it.etcPurps.includes("공동주택(아파트)") &&
-    it.mainAtchGbCdNm === "주건축물"
+  // 다중이용건축물 관련 용도 필터링 (기타 용도 통합)
+  const 다중이용건물 = items.filter(it =>
+    [
+      "공동주택",  // 아파트
+      "제2종근린생활시설",  // 상업시설
+      "문화 및 집회시설",  // 문화시설
+      "종교시설",  // 종교시설
+      "판매시설",  // 판매시설
+      "운수시설",  // 운수시설
+      "의료시설",  // 의료시설
+      "숙박시설",  // 숙박시설
+    ].includes(it.mainPurpsCdNm) || (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
 
-  const 상업 = items.filter(it =>
-    it.mainPurpsCdNm === "제2종근린생활시설" ||
-    (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
-  );
-
-  const 부속 = items.filter(it =>
-    it.mainAtchGbCdNm === "부속건축물" &&
-    !(it.mainPurpsCdNm === "제2종근린생활시설" ||
-      (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설")))
-  );
-
-  // 연면적 totArea 기준으로 보장
-  function getTotalArea(it) {
-    return Number(it.totArea || 0);
-  }
+  // 총 연면적 계산 (다중이용건물만)
+  const totalArea = 다중이용건물.reduce((sum, it) => sum + (Number(it.totArea) || 0), 0);
 
   return {
-    아파트: 아파트.map(it => ({ ...it, 연면적: getTotalArea(it) })),
-    상업: 상업.map(it => ({ ...it, 연면적: getTotalArea(it) })),
-    부속건물: 부속.map(it => ({ ...it, 연면적: getTotalArea(it) })),
+    총건물수: items.length,
+    다중이용건물수: 다중이용건물.length,
+    총연면적: totalArea,
+    다중이용건물: 다중이용건물.map(it => ({
+      동: it.dongNm,
+      건축물구분: it.mainAtchGbCdNm,
+      용도: it.mainPurpsCdNm,
+      기타용도: it.etcPurps,
+      연면적: Number(it.totArea),
+      지상층: Number(it.grndFlrCnt),
+      지하층: Number(it.ugrndFlrCnt),
+      지붕: it.roofCdNm,
+      구조: it.strctCdNm,
+      사용승인일: it.useAprDay,
+      비상용승강기: Number(it.emgenUseElvtCnt),
+      승용승강기: Number(it.rideUseElvtCnt),
+    }))
   };
 }
 
 // 7. 다중이용건축물 판단
 function isMultiUseBuilding(summary) {
-  const allBuildings = summary.아파트.concat(summary.상업).concat(summary.부속건물);
   const multiUseAreaThreshold = 5000;
 
-  const 가목대상 = allBuildings.filter(it =>
-    ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
-      .some(u => it.mainPurpsCdNm.includes(u)) && it.연면적 >= multiUseAreaThreshold
+  // 가목: 특정 용도 + 연면적 5천 이상
+  const 가목대상 = summary.다중이용건물.filter(it =>
+    it.연면적 >= multiUseAreaThreshold
   );
 
-  const 나목대상 = allBuildings.filter(it => it.grndFlrCnt >= 16);
+  // 나목: 16층 이상
+  const 나목대상 = summary.다중이용건물.filter(it =>
+    it.지상층 >= 16
+  );
 
   const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
+
   return {
     다중이용건축물: 결과,
     판단이유: 결과 ? `가목: ${가목대상.length}개, 나목: ${나목대상.length}개` : "가목·나목 해당 없음",
   };
 }
 
-// 8. API 라우트 (/summary)
+// 8. API 라우트 (/summary) - 다중이용건축물 판단만 반환
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -164,7 +175,7 @@ app.get("/summary", async (req, res) => {
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
 
-    // 다중이용건축물 여부만 반환
+    // summary 제거하고 다중이용건축물 정보만 반환
     res.json({
       주소: input,
       다중이용건축물: multiUse.다중이용건축물,
@@ -185,3 +196,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
