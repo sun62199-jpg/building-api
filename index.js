@@ -5,7 +5,7 @@ const express = require("express");
 const path = require("path");
 require("dotenv").config();
 
-// 🔥 node-fetch v3 (ESM 전용)을 CommonJS에서 사용
+// node-fetch v3(CommonJS에서 ESM 사용)
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
@@ -102,7 +102,7 @@ async function fetchBuildingRegister(addressInfo) {
   return items;
 }
 
-// 6. 한글화 & 요약
+// 6. 한글화 & 연면적 포함
 function buildSummary(items) {
   const 아파트 = items.filter(it =>
     it.mainPurpsCdNm === "공동주택" &&
@@ -122,74 +122,29 @@ function buildSummary(items) {
       (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설")))
   );
 
-  const totalHousehold = items.reduce((sum, it) => sum + (Number(it.hhldCnt) || 0), 0);
+  // 연면적 totArea 기준으로 보장
+  function getTotalArea(it) {
+    return Number(it.totArea || 0);
+  }
 
   return {
-    총건물수: items.length,
-    아파트동수: 아파트.length,
-    상업동수: 상업.length,
-    부속동수: 부속.length,
-    총세대수: totalHousehold,
-    상업시설여부: 상업.length > 0,
-    아파트동목록: 아파트.map(it => it.dongNm),
-    아파트: 아파트.map(it => ({
-      동: it.dongNm,
-      건축물구분: it.mainAtchGbCdNm,
-      용도: it.mainPurpsCdNm,
-      기타용도: it.etcPurps,
-      연면적: Number(it.totArea),
-      지상층: Number(it.grndFlrCnt),
-      지하층: Number(it.ugrndFlrCnt),
-      세대수: Number(it.hhldCnt),
-      지붕: it.roofCdNm,
-      구조: it.strctCdNm,
-      사용승인일: it.useAprDay,
-      비상용승강기: Number(it.emgenUseElvtCnt),
-      승용승강기: Number(it.rideUseElvtCnt),
-    })),
-    상업: 상업.map(it => ({
-      동: it.dongNm,
-      건축물구분: it.mainAtchGbCdNm,
-      용도: it.mainPurpsCdNm,
-      기타용도: it.etcPurps,
-      연면적: Number(it.totArea),
-      지상층: Number(it.grndFlrCnt),
-      지하층: Number(it.ugrndFlrCnt),
-      세대수: Number(it.hhldCnt),
-      지붕: it.roofCdNm,
-      구조: it.strctCdNm,
-      사용승인일: it.useAprDay,
-      비상용승강기: Number(it.emgenUseElvtCnt),
-      승용승강기: Number(it.rideUseElvtCnt),
-    })),
-    부속건물: 부속.map(it => ({
-      동: it.dongNm,
-      건축물구분: it.mainAtchGbCdNm,
-      용도: it.mainPurpsCdNm,
-      기타용도: it.etcPurps,
-      연면적: Number(it.totArea),
-      지상층: Number(it.grndFlrCnt),
-      지하층: Number(it.ugrndFlrCnt),
-      세대수: Number(it.hhldCnt),
-      지붕: it.roofCdNm,
-      구조: it.strctCdNm,
-      사용승인일: it.useAprDay,
-      비상용승강기: Number(it.emgenUseElvtCnt),
-      승용승강기: Number(it.rideUseElvtCnt),
-    })),
+    아파트: 아파트.map(it => ({ ...it, 연면적: getTotalArea(it) })),
+    상업: 상업.map(it => ({ ...it, 연면적: getTotalArea(it) })),
+    부속건물: 부속.map(it => ({ ...it, 연면적: getTotalArea(it) })),
   };
 }
 
 // 7. 다중이용건축물 판단
 function isMultiUseBuilding(summary) {
+  const allBuildings = summary.아파트.concat(summary.상업).concat(summary.부속건물);
   const multiUseAreaThreshold = 5000;
 
-  const 가목대상 = summary.아파트.concat(summary.상업).concat(summary.부속건물)
-    .filter(it => ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
-      .some(u => it.용도.includes(u)) && it.연면적 >= multiUseAreaThreshold);
+  const 가목대상 = allBuildings.filter(it =>
+    ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
+      .some(u => it.mainPurpsCdNm.includes(u)) && it.연면적 >= multiUseAreaThreshold
+  );
 
-  const 나목대상 = summary.아파트.concat(summary.상업).concat(summary.부속건물)
-    .filter(it => it.지상층 >= 16);
+  const 나목대상 = allBuildings.filter(it => it.grndFlrCnt >= 16);
 
   const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
   return {
@@ -199,7 +154,6 @@ function isMultiUseBuilding(summary) {
 }
 
 // 8. API 라우트 (/summary)
-// 8. API 라우트 (/summary) - 다중이용건축물 판단만 반환
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -210,7 +164,7 @@ app.get("/summary", async (req, res) => {
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
 
-    // summary 제거하고 다중이용건축물 정보만 반환
+    // 다중이용건축물 여부만 반환
     res.json({
       주소: input,
       다중이용건축물: multiUse.다중이용건축물,
@@ -231,4 +185,3 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
-
