@@ -143,18 +143,18 @@ function buildSummary(items) {
 }
 
 // 7. 다중이용건축물 판단 (수정)
-function isMultiUseBuilding(items) {
+function isMultiUseBuilding(summary) {
   const multiUseAreaThreshold = 5000;
 
   // "가목" 항목: 특정 용도 + 연면적 5천 이상
-  const 가목대상 = items
+  const 가목대상 = summary.다중이용건물
     .filter(it =>
       ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
         .some(u => it.용도.includes(u)) && it.연면적 >= multiUseAreaThreshold
     );
 
   // "나목" 항목: 나머지 용도 + 지상 16층 이상
-  const 나목대상 = items
+  const 나목대상 = summary.다중이용건물
     .filter(it =>
       !["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
         .some(u => it.용도.includes(u)) && it.지상층 >= 16
@@ -192,17 +192,3 @@ app.get("/summary", async (req, res) => {
     res.status(500).json({ error: "조회 실패", detail: String(err) });
   }
 });
-
-// 루트
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
-});
-
-// 서버 시작
-app.listen(PORT, () => {
-  console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
-});
-
-
-
-
