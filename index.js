@@ -107,7 +107,7 @@ async function fetchBuildingRegister(addressInfo) {
   return data.response?.body?.items?.item || [];
 }
 
-// 6. 한글화 & 요약
+// 6. 한글화 & 요약 (GPT 계산을 돕기 위해 데이터 구조 변경)
 function buildSummary(items) {
   const 다중이용건물 = items.filter(
     (it) =>
@@ -123,85 +123,118 @@ function buildSummary(items) {
       ].includes(it.mainPurpsCdNm) ||
       (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
+    
+    // 1. 최고층 수치 계산
+    const 최고지상층수 = 다중이용건물.length 
+        ? Math.max(...다중이용건물.map(it => Number(it.grndFlrCnt) || 0)) 
+        : 0;
 
+    // 2. 가목 해당 용도의 연면적 합계 계산
+    const 가목_연면적_합계 = 다중이용건물
+        .filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm))
+        .reduce((sum, item) => sum + Number(item.totArea), 0);
+    
+    // 3. 가목 해당 용도 (문장 생성을 위한 대표 용도 1개)
+    const 가목_용도 = 다중이용건물.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
+    
   return {
     총건물수: items.length,
     다중이용건물수: 다중이용건물.length,
+    최고지상층수: 최고지상층수,
+    가목_연면적_합계: 가목_연면적_합계, 
+    가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
+    // LLM 오판을 막기 위해 원본 건물 목록에서 불필요한 연면적은 제거
     다중이용건물: 다중이용건물.map((it) => ({
-      동: it.dongNm,
       용도: it.mainPurpsCdNm,
-      연면적: Number(it.totArea),
-      지상층: Number(it.grndFlrCnt),
-      지하층: Number(it.ugrndFlrCnt),
+      지상층: Number(it.grndFlrCnt),
+      연면적: Number(it.totArea) // 가목 판단을 위해 연면적은 개별 제공
     })),
   };
 }
 
-// 7. 룰 기반 판단
+// 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
 function isMultiUseBuilding(summary) {
-  const multiUseAreaThreshold = 5000;
-  const 가목대상 = summary.다중이용건물.filter(
-    (it) =>
-      [
-        "문화 및 집회시설",
-        "종교시설",
-        "판매시설",
-        "운수시설",
-        "의료시설",
-        "숙박시설",
-      ].includes(it.용도) && it.연면적 >= multiUseAreaThreshold
-  );
-  const 나목대상 = summary.다중이용건물.filter(
-    (it) =>
-      ![
-        "문화 및 집회시설",
-        "종교시설",
-        "판매시설",
-        "운수시설",
-        "의료시설",
-        "숙박시설",
-      ].includes(it.용도) && it.지상층 >= 16
-  );
+    const multiUseAreaThreshold = 5000;
+    const 최고지상층수 = summary.최고지상층수 || 0;
+    const 가목_합계 = summary.가목_연면적_합계 || 0;
+    
+    // 1. 나목 해당 여부 (가목 용도 외 모든 건물 16층 이상)
+    const 나목_해당 = 최고지상층수 >= 16;
+    
+    // 2. 가목 해당 여부
+    const 가목_해당 = 가목_합계 >= multiUseAreaThreshold;
+    
+    // GPT가 문장을 만들도록 최종 근거 데이터 생성
+    let GPT_판단_근거 = {};
 
-  const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
-  return {
-    다중이용건축물: 결과,
-    판단이유: 결과
-      ? `가목: ${가목대상.length}개, 나목: ${나목대상.length}개`
-      : "가목·나목 해당 없음",
-  };
+    if (가목_해당) {
+        // 가목 해당 시 나목 무시 (가목이 더 엄격한 기준)
+        GPT_판단_근거 = {
+            결과: "예",
+            판단_기준: "가목",
+            가목_용도: summary.가목_대표_용도,
+            가목_연면적: 가목_합계.toFixed(2)
+        };
+    } else if (나목_해당) {
+        // 나목 해당 시 (가목에 해당하지 않으므로)
+        GPT_판단_근거 = {
+            결과: "예",
+            판단_기준: "나목",
+            최고층: 최고지상층수
+        };
+    } else {
+        // 둘 다 해당 없음
+        GPT_판단_근거 = {
+            결과: "아니오",
+            판단_기준: "없음"
+        };
+    }
+
+    const 결과 = 가목_해당 || 나목_해당;
+
+    return {
+        다중이용건축물: 결과,
+        판단이유: 결과 
+            ? `가목: ${가목_해당 ? '해당' : '없음'}, 나목: ${나목_해당 ? '해당' : '없음'}`
+            : "가목·나목 해당 없음",
+        // 🚨 GPT가 문장만 생성하도록 최종 판단 근거 데이터 전달
+        GPT_근거: GPT_판단_근거
+    };
 }
 
-// 8. LLM 판단
-async function llmJudgment(summary) {
-  const prompt = `
-다음 건축물 정보를 바탕으로 이 건물이 다중이용건축물인지 판단하고, 판단 근거를 JSON 형태로 알려줘.
+// 8. LLM 판단 (계산된 결과로 문장만 생성하는 역할로 축소)
+async function llmJudgment(ruleResult) { // ruleResult 객체를 인수로 받음
+    const { GPT_근거 } = ruleResult;
+    
+    const prompt = `
+주어진 JSON 데이터는 건축물의 다중이용건축물 여부를 서버가 최종 판단한 결과입니다.
+당신의 역할은 이 결과를 바탕으로 정해진 형식의 '판단근거' 문장을 생성하는 것입니다.
+**계산을 수행하지 말고, 오직 주어진 GPT_근거 데이터만을 사용하여** 문장을 생성해야 합니다.
 
-**[최우선 적용 규칙]**
-1.  **가목 용도 목록 (연면적 5000㎡ 이상):** 문화 및 집회시설, 종교시설, 판매시설, 운수시설, 의료시설, 숙박시설.
-2.  **나목 기준 (16층 이상):** 위 가목 용도를 제외한 **모든 용도(공동주택 포함)**는 16층 이상일 때 나목 기준에 해당된다.
-3.  **나목 형식 강제:** 공동주택, 근린생활시설 등의 용도를 언급할 때는 **절대 가목 형식의 문장을 사용하지 말고**, 오직 **나목 형식**만 사용해야 한다.
-4.  **최고층 계산:** 나목 판단을 위해, '다중이용건물' 객체에서 가장 큰 '지상층' 수치를 찾아 [데이터 내 최고 지상층 수치]로 사용해야 한다.
+**[GPT_근거 데이터]**
+${JSON.stringify(GPT_근거, null, 2)}
 
-5.  **판단 근거**는 아래 형식 중 **하나만을 사용**하여 단정적인 문장 하나로 구성되어야 한다.
+**[판단 근거 작성 규칙]**
+1.  '다중이용건축물' 키 값은 **GPT_근거.결과** 값을 그대로 사용한다.
+2.  판단 근거는 아래 형식 중 **하나만을 사용**하여 단정적인 문장 하나로 구성한다.
 
-    * **나목 해당 시 형식 (16층 이상):** "이 건물은 [데이터 내 최고 지상층 수치]층 이므로 다중이용건축물에 해당됩니다."
-    * **가목 해당 시 형식:** "이 건물은 다중이용건축물 기준 중 **[해당되는 가목 용도](굵은글씨)**로 해당되고, 연면적이 [총 연면적 수치]㎡이기 때문에 다중이용건축물에 해당됩니다."
+    * **나목 해당 시 형식:** "이 건물은 ${GPT_근거.최고층}층 이므로 다중이용건축물에 해당됩니다."
+    * **가목 해당 시 형식:** "이 건물은 다중이용건축물 기준 중 **${GPT_근거.가목_용도}(굵은글씨)**로 해당되고, 연면적이 ${GPT_근거.가목_연면적}㎡이기 때문에 다중이용건축물에 해당됩니다."
     * **해당 없을 시 형식:** "이 건물은 다중이용건축물 기준(가목, 나목)에 해당되지 않습니다."
 
-**[건축물 정보]**
-${JSON.stringify(summary, null, 2)}
-
-출력 예시 (나목, 공동주택):
+출력 예시:
 { "다중이용건축물": "예", "판단근거": "이 건물은 29층 이므로 다중이용건축물에 해당됩니다." }
 `;
-    const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1, 
-    });
-    const content = response.choices[0].message.content;
-    return JSON.parse(content);
+
+    // 🚨 LLM 호출 
+    const response = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1, 
+    });
+    const content = response.choices[0].message.content;
+
+    return JSON.parse(content);
 }
 
 // 9. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
@@ -245,13 +278,13 @@ async function kakaoSummaryHandler(req, res) {
     // 1. 필수 정보 조회 (Juso, Molit)
     const addressInfo = await searchAddress(cleanAddr); 
     const items = await fetchBuildingRegister(addressInfo);
-    const summary = buildSummary(items);
+    const summary = buildSummary(items); // 수정된 summary 구조 사용
 
-    // 2. 룰 기반 판단 (빠름)
+    // 2. 룰 기반 판단 (서버에서 최종 판단 근거를 모두 계산)
     const ruleResult = isMultiUseBuilding(summary);
     
-    // 3. LLM 판단 호출 (가장 오래 걸리는 작업, 여기서 대기)
-    const llmResult = await llmJudgment(summary);
+    // 3. LLM 판단 호출 (계산된 근거로 문장만 생성)
+    const llmResult = await llmJudgment(ruleResult);
     
     // 4. 🎨 응답 텍스트 구성: 마크다운 및 이모지 적용으로 가독성 개선
     const responseText = 
@@ -310,9 +343,7 @@ app.get("/summary", async (req, res) => {
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
 
-    const 최고지상층수 = summary.다중이용건물.length
-      ? Math.max(...summary.다중이용건물.map((it) => it.지상층 || 0))
-      : 0;
+    const 최고지상층수 = summary.최고지상층수 || 0; // 변경된 summary 구조 반영
 
     const GA_TYPES = [
       "문화 및 집회시설",
@@ -323,9 +354,10 @@ app.get("/summary", async (req, res) => {
       "숙박시설",
     ];
     const 가항목 = {};
+    const multiUseAreaThreshold = 5000;
     GA_TYPES.forEach((type) => {
       const 대상 = summary.다중이용건물.filter(
-        (it) => it.용도 === type && it.연면적 >= 5000
+        (it) => it.용도 === type && it.연면적 >= multiUseAreaThreshold
       );
       가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
     });
@@ -354,10 +386,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
-
-
-
-
-
-
