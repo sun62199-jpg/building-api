@@ -190,13 +190,11 @@ ${JSON.stringify(summary, null, 2)}
   return JSON.parse(content);
 }
 
-// --- 9. 카카오톡 스킬 핸들러 (2단계 분리) ---
-
-// 9.1. 1단계: 룰 기반만 빠르게 응답하는 핸들러
-async function kakaoRuleHandler(req, res) {
+// 9. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
+async function kakaoSummaryHandler(req, res) {
   try {
     let addr;
-    
+    
     // 주소 추출 로직
     if (req.method === "GET") {
       addr = req.query.addr;
@@ -217,55 +215,70 @@ async function kakaoRuleHandler(req, res) {
         },
       });
     }
+    
+    // 🚨 유효성 필터링 강화 (변수 전달 오류로 플레이스홀더 등이 넘어오는 경우 방지)
+    const cleanAddr = (addr || '').trim(); 
+    if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
+        console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
+        return res.status(400).json({
+            version: "2.0",
+            template: {
+                outputs: [{ simpleText: { text: "주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
+            },
+        });
+    }
 
-    // 1단계 처리: JUSO, MOLIT, Rule 판단 (5초 이내 완료)
-    const addressInfo = await searchAddress(addr);
+    // 1. 필수 정보 조회 (Juso, Molit)
+    const addressInfo = await searchAddress(cleanAddr); 
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items);
+
+    // 2. 룰 기반 판단 (빠름)
     const ruleResult = isMultiUseBuilding(summary);
     
-    // LLM 분석에 필요한 summary 데이터를 Base64로 인코딩하여 버튼에 담기
-    const encodedSummary = Buffer.from(JSON.stringify(summary)).toString('base64');
+    // 3. LLM 판단 호출 (가장 오래 걸리는 작업, 여기서 대기)
+    const llmResult = await llmJudgment(summary);
+    
+    // 4. 🎨 응답 텍스트 구성: 마크다운 및 이모지 적용으로 가독성 개선
+    const responseText = 
+        `🏢 **[건축물 위험 분석 결과]**\n` +
+        `----------------------------------------\n` +
+        `📍 **주소:** ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n` +
+        
+        `📊 **룰 기반 즉시 판단**\n` +
+        `----------------------------------------\n` +
+        `다중이용건축물 여부: **${ruleResult.다중이용건축물 ? '⚠️ 예' : '✅ 아니오'}**\n` +
+        `판단 근거: ${ruleResult.판단이유}\n\n` +
+        
+        `🧠 **AI 상세 분석 (GPT)**\n` +
+        `----------------------------------------\n` +
+        `AI 판단: **${llmResult.다중이용건축물}**\n` +
+        `분석 근거: ${llmResult.판단근거}`;
 
-    // 1단계 카카오 스킬용 JSON (룰 기반 결과 + LLM 호출 버튼)
+
+    // 카카오 스킬용 JSON
     const responseJSON = {
       version: "2.0",
       template: {
         outputs: [
           {
             simpleText: {
-              text: `📍 주소: ${addressInfo.roadAddr}\n` +
-                    `✅ 룰 기반 판단: ${ruleResult.다중이용건축물 ? "예" : "아니오"} (${ruleResult.판단이유})\n\n` +
-                     `🧠 AI 분석 결과를 요청해 주세요.`
+              text: responseText
             }
           }
-        ],
-         // 퀵 리플라이 버튼을 추가하여 LLM 분석을 2단계로 분리
-         quickReplies: [ 
-             {
-                 label: "🧠 AI 분석 결과 보기",
-                 action: "message", 
-                 // 2단계 처리를 담당하는 라우트를 호출하도록 메시지 텍스트를 설정해야 합니다.
-                 // 이 예시에서는 챗봇 빌더에서 메시지 텍스트를 '/kakao-llm-analysis' 라우트로 연결해야 합니다.
-                 messageText: "AI 분석 결과 요청",
-                 extra: { 
-                     summary: encodedSummary,
-                     type: "LLM_REQUEST" // 2단계 요청임을 알리는 플래그
-                 }
-             }
-         ]
+        ]
       }
     };
 
     res.json(responseJSON);
 
   } catch (err) {
-    console.error("FATAL ERROR IN KAKAO RULE HANDLER (1단계):", err);
+    console.error("FATAL ERROR IN KAKAO SUMMARY HANDLER (단일 응답):", err);
     res.status(500).json({
       version: "2.0",
       template: {
         outputs: [
-          { simpleText: { text: `조회 실패 (1단계): ${String(err)}` } }
+          { simpleText: { text: `조회 실패: ${String(err)}` } }
         ]
       }
     });
@@ -273,60 +286,7 @@ async function kakaoRuleHandler(req, res) {
 }
 
 
-// 9.2. 2단계: LLM 판단만 하는 핸들러 (기존 kakaoSummaryHandler의 역할 대체)
-async function kakaoLlmHandler(req, res) {
-  try {
-    // 1단계 버튼에서 인코딩된 summary 데이터가 넘어왔는지 확인
-    const encodedSummary = req.body?.action?.extra?.summary;
-    const requestType = req.body?.action?.extra?.type;
-
-    if (!encodedSummary || requestType !== "LLM_REQUEST") {
-        // 비정상적이거나 1단계 요청이 아닐 경우 오류 처리
-        return res.status(400).json({
-            version: "2.0",
-            template: {
-                outputs: [{ simpleText: { text: "AI 분석 데이터가 유효하지 않습니다. 다시 주소를 입력해주세요." } }],
-            },
-        });
-    }
-
-    // 2단계 요청 (LLM 분석)
-    const decodedSummary = Buffer.from(encodedSummary, 'base64').toString('utf8');
-    const summary = JSON.parse(decodedSummary);
-    
-    // LLM 판단 실행 (가장 오래 걸리는 작업)
-    const llmResult = await llmJudgment(summary);
-
-    // 2단계 카카오 스킬용 JSON (LLM 결과만 포함)
-    const responseJSON = {
-      version: "2.0",
-      template: {
-        outputs: [{
-          simpleText: {
-            text: `🧠 AI 분석 결과입니다.\n\n` +
-                  `LLM 판단: ${llmResult.다중이용건축물} (${llmResult.판단근거})`
-          }
-        }]
-      }
-    };
-
-    res.json(responseJSON);
-
-  } catch (err) {
-    console.error("FATAL ERROR IN KAKAO LLM HANDLER (2단계):", err);
-    res.status(500).json({
-      version: "2.0",
-      template: {
-        outputs: [
-          { simpleText: { text: `조회 실패 (2단계): ${String(err)}` } }
-        ]
-      }
-    });
-  }
-}
-
-
-// --- 10. 기존 summary 라우트 유지 (변경 없음) ---
+// 10. 기존 summary 유지
 app.get("/summary", async (req, res) => {
   try {
     const addr = req.query.addr;
@@ -367,15 +327,9 @@ app.get("/summary", async (req, res) => {
   }
 });
 
-// --- 11. 라우트 연결 (2단계 분리 적용) ---
-
-// 1단계: 주소 입력 시 호출되는 라우트 (룰 기반 판단 및 버튼 응답)
-app.get("/kakao-summary", kakaoRuleHandler);
-app.post("/kakao-summary", kakaoRuleHandler);
-
-// 2단계: AI 분석 버튼 클릭 시 호출되는 라우트 (LLM 판단 응답)
-app.post("/kakao-llm-analysis", kakaoLlmHandler); 
-
+// GET/POST 모두 단일 핸들러로 연결
+app.get("/kakao-summary", kakaoSummaryHandler);
+app.post("/kakao-summary", kakaoSummaryHandler);
 
 // 루트
 app.get("/", (req, res) =>
