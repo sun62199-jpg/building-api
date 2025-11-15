@@ -32,7 +32,9 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // 4. JUSO 주소 검색
 async function searchAddress(input) {
-  const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
+  console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`); // 👈 이 부분을 추가합니다.
+  const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
+  // ... (나머지 코드)
   const params = {
     confmKey: JUSO_KEY,
     currentPage: "1",
@@ -267,10 +269,6 @@ async function kakaoSummaryHandler(req, res) {
 app.get("/kakao-summary", kakaoSummaryHandler);
 app.post("/kakao-summary", kakaoSummaryHandler);
 
-// GET/POST 모두 연결
-app.get("/kakao-summary", kakaoSummaryHandler);
-app.post("/kakao-summary", kakaoSummaryHandler);
-
 // 10. 기존 summary 유지
 app.get("/summary", async (req, res) => {
   try {
@@ -321,3 +319,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
