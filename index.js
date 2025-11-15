@@ -30,7 +30,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. JUSO 주소 검색
+// 4. JUSO 주소 검색 (없음 시 null 반환으로 수정)
 async function searchAddress(input) {
   console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`);
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
@@ -54,7 +54,10 @@ async function searchAddress(input) {
   }
 
   const juso = data.results.juso[0];
-  if (!juso) throw new Error("검색 결과가 없습니다.");
+  if (!juso) {
+        console.warn(`[JUSO WARN] 검색 결과 없음: ${input}`);
+        return null; // ⬅️ 오류를 던지지 않고 null 반환
+    }
 
   const admCd = juso.admCd;
   return {
@@ -107,7 +110,7 @@ async function fetchBuildingRegister(addressInfo) {
   return data.response?.body?.items?.item || [];
 }
 
-// 6. 한글화 & 요약 (GPT 계산을 돕기 위해 데이터 구조 변경)
+// 6. 한글화 & 요약 (Node.js 계산을 위해 데이터 구조 변경)
 function buildSummary(items) {
   const 다중이용건물 = items.filter(
     (it) =>
@@ -172,7 +175,7 @@ function isMultiUseBuilding(summary) {
             결과: "예",
             판단_기준: "가목",
             가목_용도: summary.가목_대표_용도,
-            가목_연면적: 가목_합계.toFixed(2) // 소수점 2자리로 제한
+            가목_연면적: 가목_합계.toFixed(2)
         };
     } else if (나목_해당) {
         // 나목 해당 시 (가목에 해당하지 않으므로)
@@ -275,7 +278,22 @@ async function kakaoSummaryHandler(req, res) {
     }
 
     // 1. 필수 정보 조회 (Juso, Molit)
-    const addressInfo = await searchAddress(cleanAddr); 
+    const addressInfo = await searchAddress(cleanAddr);
+    
+    // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
+    if (!addressInfo) {
+        return res.json({ // ⬅️ HTTP 200 OK 응답
+            version: "2.0",
+            template: {
+                outputs: [{
+                    simpleText: {
+                        text: `⚠️ 죄송합니다. "${cleanAddr}"에 대한 건축물 정보를 찾을 수 없습니다.\n\n주소를 다시 확인해 주세요.`,
+                    }
+                }]
+            }
+        });
+    }
+    
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items); // 수정된 summary 구조 사용
 
@@ -285,9 +303,9 @@ async function kakaoSummaryHandler(req, res) {
     // 3. LLM 판단 호출 (계산된 근거로 문장만 생성)
     const llmResult = await llmJudgment(ruleResult);
     
-    // 4. 🎨 응답 텍스트 구성: 문단 간격 두 줄 적용
+    // 4. 🎨 응답 텍스트 구성: 문단 간격 두 줄 적용 (최종 깔끔한 텍스트 출력)
     const responseText = 
-        `[다중이용건축물 조회 결과]\n` +
+        `[건축물 안전 분석 리포트]\n` +
         `조회 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n\n` +
         
         `법규 기반 최종 판단\n` +
@@ -335,6 +353,9 @@ app.get("/summary", async (req, res) => {
     const addr = req.query.addr;
     if (!addr) return res.status(400).json({ error: "주소 필요" });
     const addressInfo = await searchAddress(addr);
+    
+    if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } // null 체크 추가
+    
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
@@ -350,7 +371,7 @@ app.get("/summary", async (req, res) => {
       "숙박시설",
     ];
     const 가항목 = {};
-    const multiUseAreaThreshold = 5000;
+    const multiUseAreaThreshold = 5000;
     GA_TYPES.forEach((type) => {
       const 대상 = summary.다중이용건물.filter(
         (it) => it.용도 === type && it.연면적 >= multiUseAreaThreshold
