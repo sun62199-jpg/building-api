@@ -143,11 +143,10 @@ function buildSummary(items) {
     최고지상층수: 최고지상층수,
     가목_연면적_합계: 가목_연면적_합계, 
     가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
-    // LLM 오판을 막기 위해 원본 건물 목록에서 불필요한 연면적은 제거
     다중이용건물: 다중이용건물.map((it) => ({
       용도: it.mainPurpsCdNm,
       지상층: Number(it.grndFlrCnt),
-      연면적: Number(it.totArea) // 가목 판단을 위해 연면적은 개별 제공
+      연면적: Number(it.totArea)
     })),
   };
 }
@@ -173,7 +172,7 @@ function isMultiUseBuilding(summary) {
             결과: "예",
             판단_기준: "가목",
             가목_용도: summary.가목_대표_용도,
-            가목_연면적: 가목_합계.toFixed(2)
+            가목_연면적: 가목_합계.toFixed(2) // 소수점 2자리로 제한
         };
     } else if (나목_해당) {
         // 나목 해당 시 (가목에 해당하지 않으므로)
@@ -209,7 +208,7 @@ async function llmJudgment(ruleResult) { // ruleResult 객체를 인수로 받�
     const prompt = `
 주어진 JSON 데이터는 건축물의 다중이용건축물 여부를 서버가 최종 판단한 결과입니다.
 당신의 역할은 이 결과를 바탕으로 정해진 형식의 '판단근거' 문장을 생성하는 것입니다.
-**계산을 수행하지 말고, 오직 주어진 GPT_근거 데이터만을 사용하여** 문장을 생성해야 합니다.
+계산을 수행하지 말고, 오직 주어진 GPT_근거 데이터만을 사용하여 문장을 생성해야 합니다.
 
 **[GPT_근거 데이터]**
 ${JSON.stringify(GPT_근거, null, 2)}
@@ -263,14 +262,14 @@ async function kakaoSummaryHandler(req, res) {
       });
     }
     
-    // 🚨 유효성 필터링 강화 (변수 전달 오류로 플레이스홀더 등이 넘어오는 경우 방지)
+    // 🚨 유효성 필터링 강화
     const cleanAddr = (addr || '').trim(); 
     if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
         console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
-        return res.status(400).json({
+        return res.json({
             version: "2.0",
             template: {
-                outputs: [{ simpleText: { text: "주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
+                outputs: [{ simpleText: { text: "⚠️ 주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
             },
         });
     }
@@ -286,21 +285,18 @@ async function kakaoSummaryHandler(req, res) {
     // 3. LLM 판단 호출 (계산된 근거로 문장만 생성)
     const llmResult = await llmJudgment(ruleResult);
     
-    // 4. 🎨 응답 텍스트 구성: 마크다운 및 이모지 적용으로 가독성 개선
+    // 4. 🎨 응답 텍스트 구성: 문단 간격 두 줄 적용
     const responseText = 
-        `🏢 **[다중이용 건축물 조회 결과]**\n` +
-        `----------------------------------------\n` +
-        `📍 **주소:** ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n` +
+        `[다중이용건축물 조회 결과]\n` +
+        `조회 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n\n` +
         
-        `📊 **규칙 기반 즉시 판단**\n` +
-        `----------------------------------------\n` +
-        `다중이용건축물 여부: **${ruleResult.다중이용건축물 ? '⚠️ 예' : '✅ 아니오'}**\n` +
-        `판단 근거: ${ruleResult.판단이유}\n\n` +
+        `법규 기반 최종 판단\n` +
+        `다중이용건축물 여부 = ${ruleResult.다중이용건축물 ? 'YES' : 'NO'}\n` +
+        `주요 판단 근거 = ${ruleResult.판단이유}\n\n\n` +
         
-        `🧠 **AI 상세 분석 (GPT)**\n` +
-        `----------------------------------------\n` +
-        `AI 판단: **${llmResult.다중이용건축물}**\n` +
-        `분석 근거: ${llmResult.판단근거}`;
+        `AI 전문 분석 (GPT)\n` +
+        `AI 최종 판단 = ${llmResult.다중이용건축물}\n` +
+        `분석 근거 요약 = ${llmResult.판단근거}`;
 
 
     // 카카오 스킬용 JSON
