@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 3000;
 // 2. 환경변수 확인 (안전하게)
 const JUSO_KEY = process.env.JUSO_KEY || "";
 const MOLIT_KEY = process.env.MOLIT_KEY || "";
-const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_KEY = process.env.OPENAI_AI_KEY || "";
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
   console.warn(
@@ -214,3 +214,4 @@ app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html"
 
 // 서버 시작
 app.listen(PORT, () => console.log(`서버 실행 중 ▶ http://localhost:${PORT}`));
+
