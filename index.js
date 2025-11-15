@@ -189,8 +189,11 @@ async function llmJudgment(summary) {
 **[건축물 정보]**
 ${JSON.stringify(summary, null, 2)}
 
-출력 예시:
-{ "다중이용건축물": "예", "판단근거": "이 건물은 **29층** 이상이므로 나목 기준에 해당되어 다중이용건축물에 해당됩니다." }
+출력 예시 (나목):
+{ "다중이용건축물": "예", "판단근거": "이 건물은 29층 이므로 다중이용건축물에 해당됩니다." }
+
+출력 예시 (가목):
+{ "다중이용건축물": "예", "판단근거": "이 건물은 다중이용건축물 기준 중 **판매시설**로 해당되고, 연면적이 6000㎡이기 때문에 다중이용건축물에 해당됩니다." }
 `;
     const response = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
@@ -351,6 +354,7 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
 
 
 
