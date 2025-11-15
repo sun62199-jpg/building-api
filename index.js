@@ -13,10 +13,12 @@ const PORT = process.env.PORT || 3000;
 // 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY;
+const OPENAI_KEY = process.env.OPENAI_KEY;
 
 if (!JUSO_KEY || !MOLIT_KEY) {
   console.warn("⚠️ JUSO_KEY 또는 MOLIT_KEY 환경변수가 설정되지 않았습니다.");
 }
+if (!OPENAI_KEY) console.warn("⚠️ OPENAI_KEY 환경변수가 설정되지 않았습니다.");
 
 // 3. 미들웨어
 app.use(express.json());
@@ -34,7 +36,6 @@ async function searchAddress(input) {
   };
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
-  console.log("📡 JUSO API 요청:", url.toString());
   const res = await fetch(url.toString());
   if (!res.ok) throw new Error(`주소 검색 API 오류: HTTP ${res.status}`);
 
@@ -77,10 +78,8 @@ async function fetchBuildingRegister(addressInfo) {
   };
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
-  console.log("📡 건축물대장 API 요청:", url.toString());
   const res = await fetch(url.toString());
   const text = await res.text();
-  console.log("📦 건축물대장 RAW 응답 앞부분:", text.slice(0, 200));
   if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
@@ -100,29 +99,25 @@ async function fetchBuildingRegister(addressInfo) {
   return items;
 }
 
-// 6. 한글화 & 요약 (기타 용도 통합 필터링)
+// 6. 한글화 & 요약
 function buildSummary(items) {
-  // 다중이용건축물 관련 용도 필터링 (기타 용도 통합)
   const 다중이용건물 = items.filter(it =>
     [
-      "공동주택",  // 아파트
-      "제2종근린생활시설",  // 상업시설
-      "문화 및 집회시설",  // 문화시설
-      "종교시설",  // 종교시설
-      "판매시설",  // 판매시설
-      "운수시설",  // 운수시설
-      "의료시설",  // 의료시설
-      "숙박시설",  // 숙박시설
-    ].includes(it.mainPurpsCdNm) || (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
+      "공동주택",
+      "제2종근린생활시설",
+      "문화 및 집회시설",
+      "종교시설",
+      "판매시설",
+      "운수시설",
+      "의료시설",
+      "숙박시설",
+    ].includes(it.mainPurpsCdNm) ||
+    (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
-
-  // 총 연면적 계산 (다중이용건물만)
-  const totalArea = 다중이용건물.reduce((sum, it) => sum + (Number(it.totArea) || 0), 0);
 
   return {
     총건물수: items.length,
     다중이용건물수: 다중이용건물.length,
-    총연면적: totalArea,
     다중이용건물: 다중이용건물.map(it => ({
       동: it.dongNm,
       건축물구분: it.mainAtchGbCdNm,
@@ -140,23 +135,19 @@ function buildSummary(items) {
   };
 }
 
-// 7. 다중이용건축물 판단 (수정)
+// 7. 다중이용건축물 판단
 function isMultiUseBuilding(summary) {
   const multiUseAreaThreshold = 5000;
 
-  // "가목" 항목: 특정 용도 + 연면적 5천 이상
-  const 가목대상 = summary.다중이용건물
-    .filter(it =>
-      ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
-        .some(u => it.용도.includes(u)) && it.연면적 >= multiUseAreaThreshold
-    );
+  const 가목대상 = summary.다중이용건물.filter(it =>
+    ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
+      .includes(it.용도) && it.연면적 >= multiUseAreaThreshold
+  );
 
-  // "나목" 항목: 나머지 용도 + 지상 16층 이상
-  const 나목대상 = summary.다중이용건물
-    .filter(it =>
-      !["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
-        .some(u => it.용도.includes(u)) && it.지상층 >= 16
-    );
+  const 나목대상 = summary.다중이용건물.filter(it =>
+    !["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
+      .includes(it.용도) && it.지상층 >= 16
+  );
 
   const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
 
@@ -168,7 +159,7 @@ function isMultiUseBuilding(summary) {
   };
 }
 
-// 8. API 라우트 (/summary) - 다중이용건축물 판단만 반환
+// 8. API 라우트 (/summary)
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -197,24 +188,55 @@ app.get("/summary", async (req, res) => {
     const 가항목 = {};
     GA_TYPES.forEach(type => {
       const 대상 = summary.다중이용건물.filter(it =>
-        it.용도 === type &&
-        ((["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"].includes(it.용도) && it.연면적 >= 5000) || false)
+        it.용도 === type && it.연면적 >= 5000
       );
       가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
     });
 
-    // 최종 JSON 반환
     res.json({
       주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
       다중이용건축물: multiUse.다중이용건축물 ? "예" : "아니오",
       판단근거: {
         가: 가항목,
         나: { 최고지상층수 }
-      }
+      },
+      summary // LLM 호출용으로 전체 요약도 반환
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "조회 실패", detail: String(err) });
+  }
+});
+
+// 9. LLM 호출 엔드포인트
+app.post("/llm", async (req, res) => {
+  try {
+    const { question, summary } = req.body;
+    if (!question || !summary) return res.status(400).json({ error: "question과 summary 필요" });
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${OPENAI_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-3.5-turbo",
+        messages: [
+          { role: "system", content: "당신은 한국 다중이용건축물 판단 전문 어시스턴트입니다." },
+          { role: "user", content: `다음 건물 정보에 대해 질문에 답해주세요:\n${JSON.stringify(summary)}\n질문: ${question}` }
+        ],
+        temperature: 0.2
+      })
+    });
+
+    const data = await response.json();
+    const answer = data.choices?.[0]?.message?.content || "답변을 가져올 수 없습니다.";
+    res.json({ answer });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "LLM 호출 실패", detail: String(err) });
   }
 });
 
