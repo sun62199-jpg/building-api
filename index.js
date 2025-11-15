@@ -243,7 +243,16 @@ async function kakaoSummaryHandler(req, res) {
     let addr;
     
     // 주소 추출 로직
-    // ... (addr 추출 로직)
+    if (req.method === "GET") {
+      addr = req.query.addr;
+    } else if (req.method === "POST") {
+      if (req.body && req.body.action && req.body.action.params) {
+        addr = req.body.action.params.addr; 
+      }
+      if (!addr && req.body.addr) {
+        addr = req.body.addr;
+      }
+    }
 
     if (!addr) {
       return res.status(400).json({
@@ -254,16 +263,14 @@ async function kakaoSummaryHandler(req, res) {
       });
     }
     
-    // 🚨 유효성 필터링 강화 (수정 부분 시작)
+    // 🚨 유효성 필터링 강화 (변수 전달 오류로 플레이스홀더 등이 넘어오는 경우 방지)
     const cleanAddr = (addr || '').trim(); 
     if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
         console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
-        
-        // 🚨 시스템 에러(HTTP 400)를 던지는 대신, 성공 응답(HTTP 200)과 친화적인 메시지 반환
-        return res.json({
+        return res.status(400).json({
             version: "2.0",
             template: {
-                outputs: [{ simpleText: { text: "⚠️ 주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
+                outputs: [{ simpleText: { text: "주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
             },
         });
     }
@@ -281,16 +288,16 @@ async function kakaoSummaryHandler(req, res) {
     
     // 4. 🎨 응답 텍스트 구성: 마크다운 및 이모지 적용으로 가독성 개선
     const responseText = 
-        `🏢 [다중이용 건축물 조회 결과]\n` +
+        `🏢 **[다중이용 건축물 조회 결과]**\n` +
         `----------------------------------------\n` +
-        `📍 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n` +
+        `📍 **주소:** ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n` +
         
-        `📊 규칙 기반 즉시 판단\n` +
+        `📊 **규칙 기반 즉시 판단**\n` +
         `----------------------------------------\n` +
         `다중이용건축물 여부: **${ruleResult.다중이용건축물 ? '⚠️ 예' : '✅ 아니오'}**\n` +
         `판단 근거: ${ruleResult.판단이유}\n\n` +
         
-        `🧠 AI 상세 분석 (GPT)\n` +
+        `🧠 **AI 상세 분석 (GPT)**\n` +
         `----------------------------------------\n` +
         `AI 판단: **${llmResult.다중이용건축물}**\n` +
         `분석 근거: ${llmResult.판단근거}`;
@@ -379,4 +386,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
