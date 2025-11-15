@@ -192,16 +192,33 @@ ${JSON.stringify(summary, null, 2)}
 // 9. 카카오톡 스킬용 라우트 (룰 + LLM)
 async function kakaoSummaryHandler(req, res) {
   try {
-    // GET일 경우 query, POST일 경우 body 사용
-    const addr = req.method === "GET" ? req.query.addr : req.body.addr;
+    let addr;
+    
+    // 1. GET 방식 (URL 쿼리) 처리
+    if (req.method === "GET") {
+      addr = req.query.addr;
+    } 
+    // 2. POST 방식 (일반 Body 또는 카카오 스킬) 처리
+    else if (req.method === "POST") {
+      // 카카오톡 스킬 요청의 표준 경로
+      if (req.body && req.body.action && req.body.action.params) {
+        // 'addr'는 챗봇에서 설정한 변수명과 일치해야 함
+        addr = req.body.action.params.addr; 
+      }
+      
+      // 스킬 경로에 변수가 없으면, 일반 POST Body에서도 확인 (Fallback)
+      if (!addr && req.body.addr) {
+        addr = req.body.addr;
+      }
+    }
+
     if (!addr) {
+      // 주소가 없는 경우에 대한 응답 (기존 로직 유지)
       return res.status(400).json({
         version: "2.0",
         template: {
-          outputs: [
-            { simpleText: { text: "주소가 필요합니다." } }
-          ]
-        }
+          outputs: [{ simpleText: { text: "주소가 필요합니다." } }],
+        },
       });
     }
 
@@ -304,4 +321,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
