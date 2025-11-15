@@ -119,7 +119,6 @@ function buildSummary(items) {
 // 7. 다중이용건축물 판단 (가·나 항목별 상세판단)
 // ------------------------------------------------------------
 function evaluateMultiUse(summary) {
-  
   const GA_TYPES = [
     "문화 및 집회시설",
     "종교시설",
@@ -129,30 +128,40 @@ function evaluateMultiUse(summary) {
     "숙박시설"
   ];
 
-  // 가 항목 판단: 연면적 5000 이상?
-  const gaResult = {};
+  // 각 가목 항목별 판단
+  const 가항목 = {};
   GA_TYPES.forEach(type => {
-    const 대상 = summary.filter(it => it.용도 === type && it.연면적 >= 5000);
-    gaResult[type] = 대상.length > 0 ? "해당" : "해당없음";
+    const 대상 = summary.다중이용건물.filter(
+      it => it.용도 === type && (
+        ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"].includes(it.용도)
+          ? it.연면적 >= 5000
+          : it.지상층 >= 16
+      )
+    );
+    가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
   });
 
-  // 나 항목: 최고 지상층수
-  const highestFloor = Math.max(...summary.map(it => it.지상층 || 0));
+  // 나목: 나머지 용도 중 지상층 16 이상
+  const 나목대상 = summary.다중이용건물.filter(
+    it => !GA_TYPES.includes(it.용도) && it.지상층 >= 16
+  );
 
-  const isMulti = 
-    Object.values(gaResult).includes("해당") ||
-    highestFloor >= 16;
+  const highestFloor = Math.max(...summary.다중이용건물.map(it => it.지상층 || 0));
+
+  const 다중이용 = summary.다중이용건물.some(
+    it => (GA_TYPES.includes(it.용도) && it.연면적 >= 5000) || (!GA_TYPES.includes(it.용도) && it.지상층 >= 16)
+  );
 
   return {
-    다중이용건축물: isMulti ? "예" : "아니오",
-    가항목: gaResult,
-    나항목: { 최고지상층수: highestFloor }
+    다중이용건축물: 다중이용 ? "예" : "아니오",
+    판단근거: {
+      가: 가항목,
+      나: { 최고지상층수: highestFloor }
+    }
   };
 }
 
-// ------------------------------------------------------------
-// 8. /summary API
-// ------------------------------------------------------------
+// 8. API 라우트 (/summary) - 최종 출력용
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -161,17 +170,13 @@ app.get("/summary", async (req, res) => {
     const addressInfo = await searchAddress(input);
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items);
-    const decision = evaluateMultiUse(summary);
+    const multiUse = evaluateMultiUse(summary);
 
     res.json({
-      주소: addressInfo.roadAddr,
-      다중이용건축물: decision.다중이용건축물,
-      판단근거: {
-        가: decision.가항목,
-        나: decision.나항목
-      }
+      주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
+      다중이용건축물: multiUse.다중이용건축물,
+      판단근거: multiUse.판단근거
     });
-
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "조회 실패", detail: String(err) });
@@ -191,3 +196,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
+
