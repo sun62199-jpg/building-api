@@ -305,12 +305,11 @@ async function kakaoSummaryHandler(req, res) {
     
     // 4. 🎨 응답 텍스트 구성: 문단 간격 두 줄 적용 (최종 깔끔한 텍스트 출력)
     const responseText = 
-        `[건축물 안전 분석 리포트]\n` +
+        `[다중이용건축물 조회 결과]\n` +
         `조회 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n\n` +
         
-        `법규 기반 최종 판단\n` +
+        `건축법 기반 판단\n` +
         `다중이용건축물 여부 = ${ruleResult.다중이용건축물 ? 'YES' : 'NO'}\n` +
-        `주요 판단 근거 = ${ruleResult.판단이유}\n\n\n` +
         
         `AI 전문 분석 (GPT)\n` +
         `AI 최종 판단 = ${llmResult.다중이용건축물}\n` +
@@ -403,3 +402,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
