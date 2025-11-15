@@ -13,12 +13,11 @@ const PORT = process.env.PORT || 3000;
 // 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY;
-const OPENAI_KEY = process.env.OPENAI_KEY;
+const OPENAI_KEY = process.env.OPENAI_KEY; // OpenAI Key 추가
 
-if (!JUSO_KEY || !MOLIT_KEY) {
-  console.warn("⚠️ JUSO_KEY 또는 MOLIT_KEY 환경변수가 설정되지 않았습니다.");
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
+  console.warn("⚠️ JUSO_KEY, MOLIT_KEY 또는 OPENAI_KEY가 설정되지 않았습니다.");
 }
-if (!OPENAI_KEY) console.warn("⚠️ OPENAI_KEY 환경변수가 설정되지 않았습니다.");
 
 // 3. 미들웨어
 app.use(express.json());
@@ -111,13 +110,15 @@ function buildSummary(items) {
       "운수시설",
       "의료시설",
       "숙박시설",
-    ].includes(it.mainPurpsCdNm) ||
-    (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
+    ].includes(it.mainPurpsCdNm) || (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
+
+  const totalArea = 다중이용건물.reduce((sum, it) => sum + (Number(it.totArea) || 0), 0);
 
   return {
     총건물수: items.length,
     다중이용건물수: 다중이용건물.length,
+    총연면적: totalArea,
     다중이용건물: 다중이용건물.map(it => ({
       동: it.dongNm,
       건축물구분: it.mainAtchGbCdNm,
@@ -139,15 +140,17 @@ function buildSummary(items) {
 function isMultiUseBuilding(summary) {
   const multiUseAreaThreshold = 5000;
 
-  const 가목대상 = summary.다중이용건물.filter(it =>
-    ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
-      .includes(it.용도) && it.연면적 >= multiUseAreaThreshold
-  );
+  const 가목대상 = summary.다중이용건물
+    .filter(it =>
+      ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
+        .some(u => it.용도.includes(u)) && it.연면적 >= multiUseAreaThreshold
+    );
 
-  const 나목대상 = summary.다중이용건물.filter(it =>
-    !["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
-      .includes(it.용도) && it.지상층 >= 16
-  );
+  const 나목대상 = summary.다중이용건물
+    .filter(it =>
+      !["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
+        .some(u => it.용도.includes(u)) && it.지상층 >= 16
+    );
 
   const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
 
@@ -159,7 +162,7 @@ function isMultiUseBuilding(summary) {
   };
 }
 
-// 8. API 라우트 (/summary)
+// 8. /summary API
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -170,12 +173,10 @@ app.get("/summary", async (req, res) => {
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
 
-    // 최고 지상층수 계산
     const 최고지상층수 = summary.다중이용건물.length
       ? Math.max(...summary.다중이용건물.map(it => it.지상층 || 0))
       : 0;
 
-    // 가목 항목별 판단
     const GA_TYPES = [
       "문화 및 집회시설",
       "종교시설",
@@ -199,22 +200,28 @@ app.get("/summary", async (req, res) => {
       판단근거: {
         가: 가항목,
         나: { 최고지상층수 }
-      },
-      summary // LLM 호출용으로 전체 요약도 반환
+      }
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "조회 실패", detail: String(err) });
   }
 });
 
-// 9. LLM 호출 엔드포인트
-app.post("/llm", async (req, res) => {
+// 9. /kakao 웹훅
+app.post("/kakao", async (req, res) => {
   try {
-    const { question, summary } = req.body;
-    if (!question || !summary) return res.status(400).json({ error: "question과 summary 필요" });
+    const userText = req.body.userRequest?.utterance;
+    if (!userText) return res.status(400).json({ error: "메시지 내용이 없습니다." });
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const [addr, question] = userText.split("|").map(s => s.trim());
+    const addressInfo = await searchAddress(addr);
+    const items = await fetchBuildingRegister(addressInfo);
+    const summary = buildSummary(items);
+
+    // OpenAI LLM 호출
+    const llmRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${OPENAI_KEY}`,
@@ -224,19 +231,28 @@ app.post("/llm", async (req, res) => {
         model: "gpt-3.5-turbo",
         messages: [
           { role: "system", content: "당신은 한국 다중이용건축물 판단 전문 어시스턴트입니다." },
-          { role: "user", content: `다음 건물 정보에 대해 질문에 답해주세요:\n${JSON.stringify(summary)}\n질문: ${question}` }
+          { role: "user", content: `주소: ${addr}\n건물 정보: ${JSON.stringify(summary)}\n질문: ${question}` }
         ],
         temperature: 0.2
       })
     });
 
-    const data = await response.json();
+    const data = await llmRes.json();
     const answer = data.choices?.[0]?.message?.content || "답변을 가져올 수 없습니다.";
-    res.json({ answer });
+
+    res.json({
+      version: "2.0",
+      template: {
+        outputs: [{ simpleText: { text: answer } }]
+      }
+    });
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "LLM 호출 실패", detail: String(err) });
+    res.status(500).json({
+      version: "2.0",
+      template: { outputs: [{ simpleText: { text: `오류 발생: ${err.message}` } }] }
+    });
   }
 });
 
