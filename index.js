@@ -190,71 +190,36 @@ ${JSON.stringify(summary, null, 2)}
 }
 
 // 9. 카카오톡 스킬용 라우트 (룰 + LLM)
-app.get("/kakao-summary", async (req, res) => {
+async function kakaoSummaryHandler(req, res) {
   try {
-    const addr = req.query.addr;
+    // GET일 경우 query, POST일 경우 body 사용
+    const addr = req.method === "GET" ? req.query.addr : req.body.addr;
     if (!addr) return res.status(400).json({ error: "주소 필요" });
 
-    // 1. 주소 검색
     const addressInfo = await searchAddress(addr);
-
-    // 2. 건축물대장 조회
     const items = await fetchBuildingRegister(addressInfo);
-
-    // 3. 요약
     const summary = buildSummary(items);
 
-    // 4. 룰 기반 판단
+    // 룰 기반 판단
     const ruleResult = isMultiUseBuilding(summary);
 
-    // 5. LLM 판단
+    // LLM 판단
     const llmResult = await llmJudgment(summary);
 
-    // 6. SkillPayload 형식으로 변환
-    const textResponse = `
-주소: ${addressInfo.roadAddr} (${addressInfo.jibun})
-
-[룰 기반 판단]
-다중이용건축물: ${ruleResult.다중이용건축물 ? "예" : "아니오"}
-판단근거: ${ruleResult.판단이유}
-
-[LLM 판단]
-다중이용건축물: ${llmResult.다중이용건축물}
-판단근거: ${llmResult.판단근거}
-    `.trim();
-
-    const skillPayload = {
-      version: "2.0",
-      template: {
-        outputs: [
-          {
-            simpleText: {
-              text: textResponse
-            }
-          }
-        ]
-      }
-    };
-
-    res.json(skillPayload);
-
+    res.json({
+      주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
+      룰기반: ruleResult,
+      LLM판단: llmResult
+    });
   } catch (err) {
     console.error(err);
-    // 스킬용 오류도 SkillPayload로 반환
-    res.json({
-      version: "2.0",
-      template: {
-        outputs: [
-          {
-            simpleText: {
-              text: `조회 실패: ${err.message}`
-            }
-          }
-        ]
-      }
-    });
+    res.status(500).json({ error: "조회 실패", detail: String(err) });
   }
-});
+}
+
+// GET/POST 모두 연결
+app.get("/kakao-summary", kakaoSummaryHandler);
+app.post("/kakao-summary", kakaoSummaryHandler);
 
 // 10. 기존 summary 유지
 app.get("/summary", async (req, res) => {
@@ -306,4 +271,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
