@@ -2,12 +2,13 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>건축물 조회기</title>
+  <title>건축물 다중이용 여부 조회</title>
   <style>
-    body { font-family: Arial; padding: 40px; }
-    input { padding: 10px; width: 300px; }
-    button { padding: 10px 20px; }
-    .result { margin-top: 20px; white-space: pre-wrap; }
+    body { font-family: Arial; padding: 40px; background: #f5f5f5; }
+    h1 { margin-bottom: 20px; }
+    input { padding: 10px; width: 300px; margin-right: 10px; }
+    button { padding: 10px 20px; cursor: pointer; }
+    .result { margin-top: 20px; padding: 20px; background: #fff; border-radius: 8px; white-space: pre-wrap; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
   </style>
 </head>
 <body>
@@ -20,8 +21,13 @@
 
   <script>
     async function search() {
-      const addr = document.getElementById("addr").value;
+      const addr = document.getElementById("addr").value.trim();
       const resultBox = document.getElementById("result");
+      if (!addr) {
+        resultBox.innerHTML = "주소를 입력해주세요.";
+        return;
+      }
+
       resultBox.innerHTML = "조회 중...";
 
       try {
@@ -33,11 +39,24 @@
           return;
         }
 
-        // 다중이용건축물 여부와 판단 근거만 표시
+        // "가" 항목 출력
+        const gaItems = Object.entries(data.판단근거?.가 || {})
+          .map(([key, val]) => `${key} ==> ${val}`)
+          .join("\n");
+
+        // "나" 항목 출력
+        const naItem = `가장 높은 지상층수 ==> ${data.판단근거?.나?.최고지상층수 || "-"}`;
+
         resultBox.innerHTML = `
 주소: ${data.주소}
 다중이용건축물: ${data.다중이용건축물 ? "✅ 예" : "❌ 아니오"}
-판단 근거: ${data.판단이유}
+
+판단 근거:
+가)
+${gaItems || "해당없음"}
+
+나)
+${naItem}
         `;
       } catch (err) {
         resultBox.innerHTML = `❌ 조회 실패: ${err}`;
