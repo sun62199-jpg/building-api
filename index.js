@@ -194,7 +194,16 @@ async function kakaoSummaryHandler(req, res) {
   try {
     // GET일 경우 query, POST일 경우 body 사용
     const addr = req.method === "GET" ? req.query.addr : req.body.addr;
-    if (!addr) return res.status(400).json({ error: "주소 필요" });
+    if (!addr) {
+      return res.status(400).json({
+        version: "2.0",
+        template: {
+          outputs: [
+            { simpleText: { text: "주소가 필요합니다." } }
+          ]
+        }
+      });
+    }
 
     const addressInfo = await searchAddress(addr);
     const items = await fetchBuildingRegister(addressInfo);
@@ -206,16 +215,40 @@ async function kakaoSummaryHandler(req, res) {
     // LLM 판단
     const llmResult = await llmJudgment(summary);
 
-    res.json({
-      주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
-      룰기반: ruleResult,
-      LLM판단: llmResult
-    });
+    // 카카오 스킬용 JSON
+    const responseJSON = {
+      version: "2.0",
+      template: {
+        outputs: [
+          {
+            simpleText: {
+              text: `주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n` +
+                    `룰 기반 판단: ${ruleResult.다중이용건축물 ? "예" : "아니오"} (${ruleResult.판단이유})\n` +
+                    `LLM 판단: ${llmResult.다중이용건축물} (${llmResult.판단근거})`
+            }
+          }
+        ]
+      }
+    };
+
+    res.json(responseJSON);
+
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "조회 실패", detail: String(err) });
+    res.status(500).json({
+      version: "2.0",
+      template: {
+        outputs: [
+          { simpleText: { text: `조회 실패: ${String(err)}` } }
+        ]
+      }
+    });
   }
 }
+
+// GET/POST 모두 연결
+app.get("/kakao-summary", kakaoSummaryHandler);
+app.post("/kakao-summary", kakaoSummaryHandler);
 
 // GET/POST 모두 연결
 app.get("/kakao-summary", kakaoSummaryHandler);
@@ -271,3 +304,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
