@@ -19,7 +19,9 @@ const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
-  console.warn("⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY 필요");
+  console.warn(
+    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY 필요"
+  );
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
@@ -45,7 +47,9 @@ async function searchAddress(input) {
 
   const data = await res.json();
   if (!data.results || data.results.common.errorCode !== "0") {
-    throw new Error(`주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`);
+    throw new Error(
+      `주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`
+    );
   }
 
   const juso = data.results.juso[0];
@@ -66,7 +70,9 @@ async function searchAddress(input) {
 // 5. 건축물대장 조회
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
-  const url = new URL("https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo");
+  const url = new URL(
+    "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+  );
   const params = {
     serviceKey: MOLIT_KEY,
     sigunguCd,
@@ -85,47 +91,83 @@ async function fetchBuildingRegister(addressInfo) {
   if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
-  try { data = JSON.parse(text); } 
-  catch (e) { throw new Error("건축물대장 JSON 파싱 실패 → " + text); }
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("건축물대장 JSON 파싱 실패 → " + text);
+  }
 
   const header = data.response?.header;
-  if (!header || header.resultCode !== "00") throw new Error(`건축물대장 조회 실패: ${header?.resultMsg || "알 수 없는 오류"}`);
+  if (!header || header.resultCode !== "00")
+    throw new Error(
+      `건축물대장 조회 실패: ${header?.resultMsg || "알 수 없는 오류"}`
+    );
 
   return data.response?.body?.items?.item || [];
 }
 
 // 6. 한글화 & 요약
 function buildSummary(items) {
-  const 다중이용건물 = items.filter(it =>
-    ["공동주택","제2종근린생활시설","문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"]
-      .includes(it.mainPurpsCdNm) || (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
+  const 다중이용건물 = items.filter(
+    (it) =>
+      [
+        "공동주택",
+        "제2종근린생활시설",
+        "문화 및 집회시설",
+        "종교시설",
+        "판매시설",
+        "운수시설",
+        "의료시설",
+        "숙박시설",
+      ].includes(it.mainPurpsCdNm) ||
+      (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
 
   return {
     총건물수: items.length,
     다중이용건물수: 다중이용건물.length,
-    다중이용건물: 다중이용건물.map(it => ({
+    다중이용건물: 다중이용건물.map((it) => ({
       동: it.dongNm,
       용도: it.mainPurpsCdNm,
       연면적: Number(it.totArea),
       지상층: Number(it.grndFlrCnt),
-      지하층: Number(it.ugrndFlrCnt)
-    }))
+      지하층: Number(it.ugrndFlrCnt),
+    })),
   };
 }
 
 // 7. 룰 기반 판단
 function isMultiUseBuilding(summary) {
   const multiUseAreaThreshold = 5000;
-  const 가목대상 = summary.다중이용건물
-    .filter(it => ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"].includes(it.용도) && it.연면적 >= multiUseAreaThreshold);
-  const 나목대상 = summary.다중이용건물
-    .filter(it => !["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"].includes(it.용도) && it.지상층 >= 16);
+  const 가목대상 = summary.다중이용건물.filter(
+    (it) =>
+      [
+        "문화 및 집회시설",
+        "종교시설",
+        "판매시설",
+        "운수시설",
+        "의료시설",
+        "숙박시설",
+      ].includes(it.용도) && it.연면적 >= multiUseAreaThreshold
+  );
+  const 나목대상 = summary.다중이용건물.filter(
+    (it) =>
+      ![
+        "문화 및 집회시설",
+        "종교시설",
+        "판매시설",
+        "운수시설",
+        "의료시설",
+        "숙박시설",
+      ].includes(it.용도) && it.지상층 >= 16
+  );
 
   const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
   return {
     다중이용건축물: 결과,
-    판단이유: 결과 ? `가목: ${가목대상.length}개, 나목: ${나목대상.length}개` : "가목·나목 해당 없음"
+    판단이유: 결과
+      ? `가목: ${가목대상.length}개, 나목: ${나목대상.length}개`
+      : "가목·나목 해당 없음",
   };
 }
 
@@ -141,7 +183,7 @@ ${JSON.stringify(summary, null, 2)}
   const response = await openai.chat.completions.create({
     model: "gpt-3.5-turbo",
     messages: [{ role: "user", content: prompt }],
-    temperature: 0
+    temperature: 0,
   });
   const content = response.choices[0].message.content;
   return JSON.parse(content);
@@ -165,7 +207,7 @@ app.get("/kakao-summary", async (req, res) => {
     res.json({
       주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
       룰기반: ruleResult,
-      LLM판단: llmResult
+      LLM판단: llmResult,
     });
   } catch (err) {
     console.error(err);
@@ -184,14 +226,21 @@ app.get("/summary", async (req, res) => {
     const multiUse = isMultiUseBuilding(summary);
 
     const 최고지상층수 = summary.다중이용건물.length
-      ? Math.max(...summary.다중이용건물.map(it => it.지상층 || 0))
+      ? Math.max(...summary.다중이용건물.map((it) => it.지상층 || 0))
       : 0;
 
-    const GA_TYPES = ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"];
+    const GA_TYPES = [
+      "문화 및 집회시설",
+      "종교시설",
+      "판매시설",
+      "운수시설",
+      "의료시설",
+      "숙박시설",
+    ];
     const 가항목 = {};
-    GA_TYPES.forEach(type => {
-      const 대상 = summary.다중이용건물.filter(it =>
-        it.용도 === type && it.연면적 >= 5000
+    GA_TYPES.forEach((type) => {
+      const 대상 = summary.다중이용건물.filter(
+        (it) => it.용도 === type && it.연면적 >= 5000
       );
       가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
     });
@@ -199,7 +248,7 @@ app.get("/summary", async (req, res) => {
     res.json({
       주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
       다중이용건축물: multiUse.다중이용건축물 ? "예" : "아니오",
-      판단근거: { 가: 가항목, 나: { 최고지상층수 } }
+      판단근거: { 가: 가항목, 나: { 최고지상층수 } },
     });
   } catch (err) {
     console.error(err);
@@ -208,9 +257,11 @@ app.get("/summary", async (req, res) => {
 });
 
 // 루트
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
+app.get("/", (req, res) =>
+  res.sendFile(path.join(__dirname, "public/index.html"))
+);
 
 // 서버 시작
-app.listen(PORT, () => console.log(`서버 실행 중 ▶ http://localhost:${PORT}`));
-});
-
+app.listen(PORT, () =>
+  console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
+);
