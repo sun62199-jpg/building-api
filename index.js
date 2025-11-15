@@ -22,9 +22,7 @@ if (!JUSO_KEY || !MOLIT_KEY) {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public"))); // public/index.html
 
-// ------------------------------------------------------------
 // 4. JUSO 주소 검색
-// ------------------------------------------------------------
 async function searchAddress(input) {
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
   const params = {
@@ -56,14 +54,13 @@ async function searchAddress(input) {
     bjdongCd: admCd.substring(5, 10),
     bun: String(juso.lnbrMnnm || "").padStart(4, "0"),
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
+    jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
     rawJuso: juso,
   };
 }
 
-// ------------------------------------------------------------
 // 5. 건축물대장 조회
-// ------------------------------------------------------------
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   const url = new URL("https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo");
@@ -103,65 +100,75 @@ async function fetchBuildingRegister(addressInfo) {
   return items;
 }
 
-// ------------------------------------------------------------
-// 6. 요약 데이터 생성 (필요 항목만 정리)
-// ------------------------------------------------------------
+// 6. 한글화 & 요약 (기타 용도 통합 필터링)
 function buildSummary(items) {
-  return items.map(it => ({
-    용도: it.mainPurpsCdNm,
-    연면적: Number(it.totArea),
-    지상층: Number(it.grndFlrCnt),
-    기타용도: it.etcPurps
-  }));
-}
-
-// ------------------------------------------------------------
-// 7. 다중이용건축물 판단 (가·나 항목별 상세판단)
-// ------------------------------------------------------------
-function evaluateMultiUse(summary) {
-  const GA_TYPES = [
-    "문화 및 집회시설",
-    "종교시설",
-    "판매시설",
-    "운수시설",
-    "의료시설",
-    "숙박시설"
-  ];
-
-  // 각 가목 항목별 판단
-  const 가항목 = {};
-  GA_TYPES.forEach(type => {
-    const 대상 = summary.다중이용건물.filter(
-      it => it.용도 === type && (
-        ["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"].includes(it.용도)
-          ? it.연면적 >= 5000
-          : it.지상층 >= 16
-      )
-    );
-    가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
-  });
-
-  // 나목: 나머지 용도 중 지상층 16 이상
-  const 나목대상 = summary.다중이용건물.filter(
-    it => !GA_TYPES.includes(it.용도) && it.지상층 >= 16
+  // 다중이용건축물 관련 용도 필터링 (기타 용도 통합)
+  const 다중이용건물 = items.filter(it =>
+    [
+      "공동주택",  // 아파트
+      "제2종근린생활시설",  // 상업시설
+      "문화 및 집회시설",  // 문화시설
+      "종교시설",  // 종교시설
+      "판매시설",  // 판매시설
+      "운수시설",  // 운수시설
+      "의료시설",  // 의료시설
+      "숙박시설",  // 숙박시설
+    ].includes(it.mainPurpsCdNm) || (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
   );
 
-  const highestFloor = Math.max(...summary.다중이용건물.map(it => it.지상층 || 0));
-
-  const 다중이용 = summary.다중이용건물.some(
-    it => (GA_TYPES.includes(it.용도) && it.연면적 >= 5000) || (!GA_TYPES.includes(it.용도) && it.지상층 >= 16)
-  );
+  // 총 연면적 계산 (다중이용건물만)
+  const totalArea = 다중이용건물.reduce((sum, it) => sum + (Number(it.totArea) || 0), 0);
 
   return {
-    다중이용건축물: 다중이용 ? "예" : "아니오",
-    판단근거: {
-      가: 가항목,
-      나: { 최고지상층수: highestFloor }
-    }
+    총건물수: items.length,
+    다중이용건물수: 다중이용건물.length,
+    총연면적: totalArea,
+    다중이용건물: 다중이용건물.map(it => ({
+      동: it.dongNm,
+      건축물구분: it.mainAtchGbCdNm,
+      용도: it.mainPurpsCdNm,
+      기타용도: it.etcPurps,
+      연면적: Number(it.totArea),
+      지상층: Number(it.grndFlrCnt),
+      지하층: Number(it.ugrndFlrCnt),
+      지붕: it.roofCdNm,
+      구조: it.strctCdNm,
+      사용승인일: it.useAprDay,
+      비상용승강기: Number(it.emgenUseElvtCnt),
+      승용승강기: Number(it.rideUseElvtCnt),
+    }))
   };
 }
 
-// 8. API 라우트 (/summary) - 최종 출력용
+// 7. 다중이용건축물 판단 (수정)
+function isMultiUseBuilding(summary) {
+  const multiUseAreaThreshold = 5000;
+
+  // "가목" 항목: 특정 용도 + 연면적 5천 이상
+  const 가목대상 = summary.다중이용건물
+    .filter(it =>
+      ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
+        .some(u => it.용도.includes(u)) && it.연면적 >= multiUseAreaThreshold
+    );
+
+  // "나목" 항목: 나머지 용도 + 지상 16층 이상
+  const 나목대상 = summary.다중이용건물
+    .filter(it =>
+      !["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
+        .some(u => it.용도.includes(u)) && it.지상층 >= 16
+    );
+
+  const 결과 = 가목대상.length > 0 || 나목대상.length > 0;
+
+  return {
+    다중이용건축물: 결과,
+    판단이유: 결과
+      ? `가목: ${가목대상.length}개, 나목: ${나목대상.length}개`
+      : "가목·나목 해당 없음",
+  };
+}
+
+// 8. API 라우트 (/summary) - 다중이용건축물 판단만 반환
 app.get("/summary", async (req, res) => {
   try {
     const input = req.query.addr;
@@ -170,12 +177,40 @@ app.get("/summary", async (req, res) => {
     const addressInfo = await searchAddress(input);
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items);
-    const multiUse = evaluateMultiUse(summary);
+    const multiUse = isMultiUseBuilding(summary);
 
+    // 최고 지상층수 계산
+    const 최고지상층수 = summary.다중이용건물.length
+      ? Math.max(...summary.다중이용건물.map(it => it.지상층 || 0))
+      : 0;
+
+    // 가목 항목별 판단
+    const GA_TYPES = [
+      "문화 및 집회시설",
+      "종교시설",
+      "판매시설",
+      "운수시설",
+      "의료시설",
+      "숙박시설"
+    ];
+
+    const 가항목 = {};
+    GA_TYPES.forEach(type => {
+      const 대상 = summary.다중이용건물.filter(it =>
+        it.용도 === type &&
+        ((["문화 및 집회시설","종교시설","판매시설","운수시설","의료시설","숙박시설"].includes(it.용도) && it.연면적 >= 5000) || false)
+      );
+      가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
+    });
+
+    // 최종 JSON 반환
     res.json({
       주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
-      다중이용건축물: multiUse.다중이용건축물,
-      판단근거: multiUse.판단근거
+      다중이용건축물: multiUse.다중이용건축물 ? "예" : "아니오",
+      판단근거: {
+        가: 가항목,
+        나: { 최고지상층수 }
+      }
     });
   } catch (err) {
     console.error(err);
@@ -183,17 +218,12 @@ app.get("/summary", async (req, res) => {
   }
 });
 
-// ------------------------------------------------------------
-// 루트 페이지
-// ------------------------------------------------------------
+// 루트
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// ------------------------------------------------------------
 // 서버 시작
-// ------------------------------------------------------------
 app.listen(PORT, () => {
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`);
 });
-
