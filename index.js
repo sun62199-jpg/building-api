@@ -11,13 +11,15 @@ const { Configuration, OpenAIApi } = require("openai");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 2. 환경변수 확인
-const JUSO_KEY = process.env.JUSO_KEY;
-const MOLIT_KEY = process.env.MOLIT_KEY;
-const OPENAI_KEY = process.env.OPENAI_API_KEY;
+// 2. 환경변수 확인 (안전하게)
+const JUSO_KEY = process.env.JUSO_KEY || "";
+const MOLIT_KEY = process.env.MOLIT_KEY || "";
+const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
-  console.warn("⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_API_KEY 필요");
+  console.warn(
+    "⚠️ 환경변수가 부족합니다. 반드시 .env에 JUSO_KEY, MOLIT_KEY, OPENAI_API_KEY를 설정하세요."
+  );
 }
 
 const openai = new OpenAIApi(new Configuration({ apiKey: OPENAI_KEY }));
@@ -43,7 +45,9 @@ async function searchAddress(input) {
 
   const data = await res.json();
   if (!data.results || data.results.common.errorCode !== "0") {
-    throw new Error(`주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`);
+    throw new Error(
+      `주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`
+    );
   }
 
   const juso = data.results.juso[0];
