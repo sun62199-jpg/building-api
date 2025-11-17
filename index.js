@@ -15,16 +15,16 @@ const PORT = process.env.PORT || 3000;
 
 // 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
+const MOLIT_KEY = process.env.MOLIT_KEY; 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-// 🚨 V-World와 Naver API 키를 환경 변수에서 사용하도록 설정
-const VWORLD_KEY = process.env.VWORLD_KEY || "6436F9DA-35E7-334B-9C08-E5C3E5AACA4A"; // V-World 키
+// 🚨 네이버 API 키 복구
 const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
 
-if (!JUSO_KEY || !VWORLD_KEY || !OPENAI_KEY || !NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
   console.warn(
-    "⚠️ 환경변수가 부족합니다. JUSO_KEY, VWORLD_KEY, OPENAI_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 필요"
+    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 필요"
   );
 }
 
@@ -75,127 +75,84 @@ async function searchAddress(input) {
   };
 }
 
-// 5. 🗺️ 네이버 Geocoding API를 이용해 주소를 좌표로 변환 (WGS84)
+// 5. 🗺️ 네이버 Geocoding API를 이용해 주소를 좌표로 변환 (WGS84) - 🚨 복구
 async function getCoordinates(fullAddress) {
-  console.log(`[NAVER GEO] 좌표 검색 시도 주소: ${fullAddress}`);
-  
-  // 🚨🚨🚨 디버그 로그 추가 (환경 변수 로드 확인) 🚨🚨🚨
-  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
-      console.error("NAVER AUTH ERROR: Client ID or Secret is NOT loaded into the environment variables (process.env). Check your .env file!");
-      throw new Error("NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 환경 변수가 로드되지 않았습니다.");
-  }
-  // 🚨🚨🚨 디버그 로그 끝 🚨🚨🚨
+    console.log(`[NAVER GEO] 좌표 검색 시도 주소: ${fullAddress}`);
+    
+    if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
+        console.error("NAVER AUTH ERROR: Client ID or Secret is NOT loaded into the environment variables (process.env). Check your .env file!");
+        throw new Error("NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 환경 변수가 로드되지 않았습니다.");
+    }
 
-  // ✅ 네이버 URL 최종 수정 적용
-  const url = new URL("https://maps.apigw.ntruss.com/map-geocode/v2/geocode");
-  url.searchParams.append("query", fullAddress);
+    const url = new URL("https://maps.apigw.ntruss.com/map-geocode/v2/geocode");
+    url.searchParams.append("query", fullAddress);
 
-  const res = await fetch(url.toString(), {
-      method: 'GET',
-      headers: {
-          "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
-          "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
-      }
-  });
+    const res = await fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+            "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
+            "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
+        }
+    });
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`네이버 Geocoding API 오류: HTTP ${res.status} (${errorText.substring(0, 50)}...)`);
-  }
+    if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`네이버 Geocoding API 오류: HTTP ${res.status} (${errorText.substring(0, 50)}...)`);
+    }
 
-  const data = await res.json();
-  const address = data.addresses?.[0];
+    const data = await res.json();
+    const address = data.addresses?.[0];
 
-  if (!address) {
-    return null;
-  }
+    if (!address) {
+        return null;
+    }
 
-  // WGS84 좌표 (경도: x, 위도: y) 반환
-  return {
-    lon: parseFloat(address.x), // 경도 (x)
-    lat: parseFloat(address.y)  // 위도 (y)
-  };
+    return {
+        lon: parseFloat(address.x), // 경도 (x)
+        lat: parseFloat(address.y)  // 위도 (y)
+    };
 }
 
-// 6. 🏛️ V-World WFS를 이용한 건축물대장 조회 및 Juso 코드 대조
+// 6. 건축물대장 조회 (MOLIT API 유지)
 async function fetchBuildingRegister(addressInfo) {
-  // 1. 네이버 API로 좌표 획득 (생략)
-  const fullAddress = addressInfo.roadAddr;
-  const coords = await getCoordinates(fullAddress);
-  
-  if (!coords) {
-      console.warn("[VWORLD WARN] 좌표 획득 실패. V-World WFS 조회를 건너뜁니다.");
-      return [];
-  }
-  
-  // 2. 좌표를 BBOX 필터로 변환 (🚨 BBOX 순서 및 변수명 수정)
-  const delta = 0.0001; 
-  // WGS84(EPSG:4326) 명세: (ymin, xmin, ymax, xmax) = (lat_min, lon_min, lat_max, lon_max)
-  const lat_min = coords.lat - delta;
-  const lon_min = coords.lon - delta;
-  const lat_max = coords.lat + delta;
-  const lon_max = coords.lon + delta;
-  
-  const bbox = `${lat_min},${lon_min},${lat_max},${lon_max}`;
-
-  // 3. V-World WFS API 호출 (🚨 파라미터 값 수정)
-  // NOTE: 공식 기본 URL을 사용합니다.
-  const url = new URL("https://api.vworld.kr/req/wfs"); 
-  
+  const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
+  const url = new URL(
+    "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+  );
   const params = {
-    key: VWORLD_KEY, 
-    domain: "building-api-0292.onrender.com", 
-    service: "WFS",
-    version: "1.1.0",
-    request: "GetFeature",
-    typename: "gs:GisGnrlBuilding",
-    // ✅ JSONP가 아닌 공식 JSON 응답 포맷 사용
-    outputFormat: "application/json", 
-    bbox: bbox,
-    // ✅ 네이버 좌표계와 일치하는 WGS84 사용 (EPSG:4326)
-    srsname: "EPSG:4326" 
+    serviceKey: MOLIT_KEY,
+    sigunguCd,
+    bjdongCd,
+    platGbCd: "0",
+    bun,
+    ji,
+    numOfRows: "100",
+    pageNo: "1",
+    _type: "json",
   };
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   const res = await fetch(url.toString());
   const text = await res.text();
-  
-  if (!res.ok) throw new Error(`V-World WFS API 오류: HTTP ${res.status} → ${text.substring(0, 50)}...`);
+  if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
   try {
     data = JSON.parse(text);
   } catch (e) {
-    throw new Error("V-World WFS JSON 파싱 실패 (XML/GML 응답 가능성) → " + text.substring(0, 100));
+    throw new Error("건축물대장 JSON 파싱 실패 → " + text);
   }
-  
-  const features = data.features || [];
-  
-  // 4. Juso API 코드와 V-World 속성 대조 및 필터링 (최종 검증)
-  const finalItems = features
-    .map(feature => feature.properties)
-    .filter(props => {
-      // V-World 속성 필드 이름 sig_cd, bjdong_cd, bun, ji 를 가정하고 대조
-      const vworldSigungu = String(props.sig_cd);
-      const vworldBjdong = String(props.bjdong_cd);
-      const vworldBun = String(props.bun || '').padStart(4, '0');
-      const vworldJi = String(props.ji || '').padStart(4, '0');
-      
-      return (
-        vworldSigungu === addressInfo.sigunguCd &&
-        vworldBjdong === addressInfo.bjdongCd &&
-        vworldBun === addressInfo.bun &&
-        vworldJi === addressInfo.ji
-      );
-    })
-    .map(props => ({
-      // 층수/면적 데이터 추출 및 표준화
-      mainPurpsCdNm: props.main_purps_nm || '알 수 없음', 
-      grndFlrCnt: props.grnd_flr_cnt ? Number(props.grnd_flr_cnt) : 0, // 지상층
-      totArea: props.tot_area ? Number(props.tot_area) : 0 // 연면적
-    }));
-  
-  return finalItems;
+
+  const header = data.response?.header;
+  if (!header || header.resultCode !== "00")
+    throw new Error(
+      `건축물대장 조회 실패: ${header?.resultMsg || "알 수 없는 오류"}`
+    );
+
+  // 단일 항목일 경우 배열이 아닌 객체로 오는 경우가 있어 배열로 통합
+  const rawItems = data.response?.body?.items?.item;
+  if (!rawItems) return [];
+  return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
 // 7. 한글화 & 요약 (Node.js 계산을 위해 데이터 구조 변경)
@@ -235,14 +192,14 @@ function buildSummary(items) {
     가목_연면적_합계: 가목_연면적_합계, 
     가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
     다중이용건물: 다중이용건물.map((it) => ({
-       용도: it.mainPurpsCdNm,
+      용도: it.mainPurpsCdNm,
       지상층: Number(it.grndFlrCnt),
       연면적: Number(it.totArea)
     })),
   };
 }
 
-// 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
+// 8. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
 function isMultiUseBuilding(summary) {
     const multiUseAreaThreshold = 5000;
     const 최고지상층수 = summary.최고지상층수 || 0;
@@ -292,7 +249,7 @@ function isMultiUseBuilding(summary) {
     };
 }
 
-// 8. LLM 판단 (계산된 결과로 문장만 생성하는 역할로 축소)
+// 9. LLM 판단 (계산된 결과로 문장만 생성하는 역할로 축소)
 async function llmJudgment(ruleResult) { // ruleResult 객체를 인수로 받음
     const { GPT_근거 } = ruleResult;
     
@@ -335,7 +292,7 @@ ${JSON.stringify(GPT_근거, null, 2)}
     }
 }
 
-// 9. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
+// 10. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
 async function kakaoSummaryHandler(req, res) {
   try {
     let addr;
@@ -373,12 +330,12 @@ async function kakaoSummaryHandler(req, res) {
         });
     }
 
-    // 1. 필수 정보 조회 (Juso, Naver Geo, V-World WFS)
+    // 1. 필수 정보 조회 (Juso)
     const addressInfo = await searchAddress(cleanAddr);
     
     // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
     if (!addressInfo) {
-        return res.json({ // ⬅️ HTTP 200 OK 응답
+        return res.json({ 
             version: "2.0",
             template: {
                 outputs: [{
@@ -390,7 +347,15 @@ async function kakaoSummaryHandler(req, res) {
         });
     }
     
-    // 🚨 통합 함수 fetchBuildingRegister 호출 (좌표 획득 로직 포함됨)
+    // 🚨 네이버 Geocoding API를 호출하여 좌표를 획득합니다. (새로 추가)
+    const coords = await getCoordinates(addressInfo.roadAddr);
+    if (!coords) {
+        console.warn("[GEO WARN] 네이버 Geocoding 좌표 획득 실패.");
+    } else {
+        console.log(`[GEO DEBUG] 좌표 획득 성공: ${coords.lat}, ${coords.lon}`);
+    }
+    
+    // 🚨 fetchBuildingRegister 호출 (MOLIT)
     const items = await fetchBuildingRegister(addressInfo);
     
     if (items.length === 0) {
@@ -408,13 +373,13 @@ async function kakaoSummaryHandler(req, res) {
     
     const summary = buildSummary(items);
     
-    // 2. 룰 기반 판단 (서버에서 최종 판단 근거를 모두 계산)
+    // 2. 룰 기반 판단
     const ruleResult = isMultiUseBuilding(summary);
     
-    // 3. LLM 판단 호출 (계산된 근거로 문장만 생성)
+    // 3. LLM 판단 호출
     const llmResult = await llmJudgment(ruleResult);
     
-    // 4. 🎨 응답 텍스트 구성: 문단 간격 두 줄 적용 (최종 깔끔한 텍스트 출력)
+    // 4. 🎨 응답 텍스트 구성
     const responseText = 
         `[다중이용건축물 조회 결과]\n` +
         `조회 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n\n` +
@@ -457,20 +422,24 @@ async function kakaoSummaryHandler(req, res) {
 }
 
 
-// 10. 기존 summary 유지
+// 11. 기존 summary 유지
 app.get("/summary", async (req, res) => {
   try {
     const addr = req.query.addr;
     if (!addr) return res.status(400).json({ error: "주소 필요" });
     const addressInfo = await searchAddress(addr);
     
-    if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } // null 체크 추가
+    if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } 
     
+    // 🚨 네이버 Geocoding 호출 (옵션 2를 위해 추가)
+    const coords = await getCoordinates(addressInfo.roadAddr);
+    if (!coords) { console.warn("[GEO WARN] 좌표 획득 실패."); }
+
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
 
-    const 최고지상층수 = summary.최고지상층수 || 0; // 변경된 summary 구조 반영
+    const 최고지상층수 = summary.최고지상층수 || 0; 
 
     const GA_TYPES = [
       "문화 및 집회시설",
