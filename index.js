@@ -80,17 +80,17 @@ async function fetchBuildingRegister(addressInfo) {
   let params;
 
   if (bdMgtSn) {
-    // 🚨 공동주택 관리번호가 있을 경우: 관리번호 기반 조회
-    endpoint = "getBrHnoInfo"; 
+    // 🚨 [수정] getBrHnoInfo 대신 getBrTitleInfoApt 시도
+    endpoint = "getBrTitleInfoApt"; 
     params = {
       serviceKey: MOLIT_KEY,
-      sigunguCd: sigunguCd, // 관리번호 조회에서도 sigunguCd는 필수
+      sigunguCd: sigunguCd,
       bdMgtSn: bdMgtSn, // 관리번호 사용
       _type: "json",
       numOfRows: "100",
       pageNo: "1",
     };
-    console.log(`[MOLIT] 관리번호 기반 조회 시도: ${bdMgtSn}`);
+    console.log(`[MOLIT] 관리번호 기반 (Apt) 조회 시도: ${bdMgtSn}`);
   } else {
     // 🚨 관리번호가 없을 경우: 기존 지번 기반 조회 유지 (일반 건축물용)
     endpoint = "getBrTitleInfo";
@@ -338,7 +338,7 @@ async function kakaoSummaryHandler(req, res) {
             template: {
                 outputs: [{
                     simpleText: {
-                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (지번 또는 관리번호 조회 실패)`,
+                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (관리번호 및 지번 조회 실패)`,
                     }
                 }]
             }
