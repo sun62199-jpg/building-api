@@ -78,16 +78,27 @@ async function searchAddress(input) {
 // 5. 🗺️ 네이버 Geocoding API를 이용해 주소를 좌표로 변환 (WGS84)
 async function getCoordinates(fullAddress) {
   console.log(`[NAVER GEO] 좌표 검색 시도 주소: ${fullAddress}`);
+  
+  // 🚨🚨🚨 디버그 로그 추가 🚨🚨🚨
+  if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
+      console.error("NAVER AUTH ERROR: Client ID or Secret is NOT loaded into the environment variables (process.env). Check your .env file!");
+      // 키가 없으면 401 오류가 확실하므로 에러를 발생시킵니다.
+      throw new Error("NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 환경 변수가 로드되지 않았습니다.");
+  }
+  // 🚨🚨🚨 디버그 로그 끝 🚨🚨🚨
+
   const url = new URL("https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode");
   url.searchParams.append("query", fullAddress);
 
   const res = await fetch(url.toString(), {
-    method: 'GET',
-    headers: {
-      "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
-      "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
-    }
+      method: 'GET',
+      headers: {
+          "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
+          "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
+      }
   });
+  // ... (나머지 로직 유지)
+}
 
   if (!res.ok) {
     const errorText = await res.text();
@@ -496,3 +507,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
