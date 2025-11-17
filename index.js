@@ -125,18 +125,28 @@ async function fetchBuildingRegister(addressInfo) {
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
-    // 🚨 쌈빢한 필터링 로직: 엉뚱한 건물 제거 🚨
+    // 🚨 최종 필터링 로직 (불완전 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
-        const purp = it.mainPurpsCdNm;
-        const useAprYear = Number(it.useAprDay?.substring(0, 4) || 0);
+        const purp = it.mainPurpsCdNm?.trim() || ''; // 주용도 공백 제거
+        const totArea = Number(it.totArea) || 0;
+        const grndFlrCnt = Number(it.grndFlrCnt) || 0;
+        const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
-        // 1. 주용도 필터링: 공동주택/상업지역에 어울리지 않는 엉뚱한 용도 제거
-        if (purp === '공장' || purp === '창고' || purp === '위험물저장및처리시설') {
-            return false;
+        // 1. 불완전 데이터 필터링: 연면적이 0이거나 주용도가 빈 값인 경우 (rnum: 1번 건물 처리)
+        if (totArea === 0 || purp === '') {
+            // 단, 지상층수가 16층 이상이면 공동주택이므로 예외 처리 (주용도 누락된 신축 아파트 동 대장일 경우)
+            if (grndFlrCnt >= 16) return true; 
+            return false; // 연면적 0 또는 주용도 빈 값은 불량 데이터로 간주하고 제거
+        }
+
+        // 2. 엉뚱한 용도 필터링: 공장, 창고, 위험물 (rnum: 2번 건물 처리)
+        // includes()를 사용하여 "공장(제조업)", "공장" 모두 대응
+        if (purp.includes('공장') || purp.includes('창고') || purp.includes('위험물')) {
+            return false; 
         }
         
-        // 2. 노후도 필터링: 건물이 너무 오래되어 (40년 이상) 현재의 주소에 매칭되기 어려운 경우 제거
-        if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && Number(it.grndFlrCnt) < 5) {
+        // 3. 노후도 필터링 (기존 로직 유지)
+        if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
             return false; 
         }
         
@@ -457,3 +467,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
