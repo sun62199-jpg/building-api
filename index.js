@@ -18,13 +18,9 @@ const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY; 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-// 🚨 네이버 API 키 복구
-const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
-const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
-
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
   console.warn(
-    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY, NAVER_CLIENT_ID, NAVER_CLIENT_SECRET 필요"
+    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY 필요"
   );
 }
 
@@ -71,65 +67,51 @@ async function searchAddress(input) {
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
-    rawJuso: juso, // 건축물 관리번호 등 포함
+    rawJuso: juso, // 🚨 bdMgtSn (건축물 관리번호) 포함
   };
 }
 
-// 5. 🗺️ 네이버 Geocoding API를 이용해 주소를 좌표로 변환 (WGS84) - 🚨 복구
-async function getCoordinates(fullAddress) {
-    console.log(`[NAVER GEO] 좌표 검색 시도 주소: ${fullAddress}`);
-    
-    if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
-        console.error("NAVER AUTH ERROR: Client ID or Secret is NOT loaded into the environment variables (process.env). Check your .env file!");
-        throw new Error("NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 환경 변수가 로드되지 않았습니다.");
-    }
-
-    const url = new URL("https://maps.apigw.ntruss.com/map-geocode/v2/geocode");
-    url.searchParams.append("query", fullAddress);
-
-    const res = await fetch(url.toString(), {
-        method: 'GET',
-        headers: {
-            "X-NCP-APIGW-API-KEY-ID": NAVER_CLIENT_ID,
-            "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
-        }
-    });
-
-    if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`네이버 Geocoding API 오류: HTTP ${res.status} (${errorText.substring(0, 50)}...)`);
-    }
-
-    const data = await res.json();
-    const address = data.addresses?.[0];
-
-    if (!address) {
-        return null;
-    }
-
-    return {
-        lon: parseFloat(address.x), // 경도 (x)
-        lat: parseFloat(address.y)  // 위도 (y)
-    };
-}
-
-// 6. 건축물대장 조회 (MOLIT API 유지)
+// 5. 건축물대장 조회 (관리번호 조회 로직 통합)
 async function fetchBuildingRegister(addressInfo) {
+  const bdMgtSn = addressInfo.rawJuso?.bdMgtSn; // 🚨 관리번호 추출
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
+  
+  // 1. 사용할 API 엔드포인트와 파라미터를 결정
+  let endpoint = "getBrTitleInfo"; // 기본값: 지번 조회
+  let params;
+
+  if (bdMgtSn) {
+    // 🚨 공동주택 관리번호가 있을 경우: 관리번호 기반 조회로 전환
+    endpoint = "getBrHnoInfo"; 
+    params = {
+      serviceKey: MOLIT_KEY,
+      sigunguCd: sigunguCd, // 관리번호 조회에서도 sigunguCd는 필수
+      bdMgtSn: bdMgtSn, // 관리번호 사용
+      _type: "json",
+      numOfRows: "100",
+      pageNo: "1",
+    };
+    console.log(`[MOLIT] 관리번호 기반 조회 시도: ${bdMgtSn}`);
+  } else {
+    // 🚨 관리번호가 없을 경우: 기존 지번 기반 조회 유지 (일반 건축물용)
+    params = {
+      serviceKey: MOLIT_KEY,
+      sigunguCd,
+      bjdongCd,
+      platGbCd: "0",
+      bun,
+      ji,
+      _type: "json",
+      numOfRows: "100",
+      pageNo: "1",
+    };
+     console.log(`[MOLIT] 지번 기반 조회 시도: ${sigunguCd}-${bjdongCd}-${bun}-${ji}`);
+  }
+
   const url = new URL(
-    "https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo"
+    `https://apis.data.go.kr/1613000/BldRgstHubService/${endpoint}`
   );
-  const params = {
-    serviceKey: MOLIT_KEY,
-    sigunguCd,
-    bjdongCd,
-    platGbCd: "0",
-    bun,
-    ji,
-    numOfRows: "100",
-    pageNo: "1",
-    _type: "json",
-  };
+  
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   const res = await fetch(url.toString());
@@ -155,7 +137,7 @@ async function fetchBuildingRegister(addressInfo) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 7. 한글화 & 요약 (Node.js 계산을 위해 데이터 구조 변경)
+// 6. 한글화 & 요약 (Node.js 계산을 위해 데이터 구조 변경)
 function buildSummary(items) {
   const 다중이용건물 = items.filter(
     (it) =>
@@ -199,7 +181,7 @@ function buildSummary(items) {
   };
 }
 
-// 8. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
+// 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
 function isMultiUseBuilding(summary) {
     const multiUseAreaThreshold = 5000;
     const 최고지상층수 = summary.최고지상층수 || 0;
@@ -249,7 +231,7 @@ function isMultiUseBuilding(summary) {
     };
 }
 
-// 9. LLM 판단 (계산된 결과로 문장만 생성하는 역할로 축소)
+// 8. LLM 판단 (계산된 결과로 문장만 생성하는 역할로 축소)
 async function llmJudgment(ruleResult) { // ruleResult 객체를 인수로 받음
     const { GPT_근거 } = ruleResult;
     
@@ -292,7 +274,7 @@ ${JSON.stringify(GPT_근거, null, 2)}
     }
 }
 
-// 10. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
+// 9. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
 async function kakaoSummaryHandler(req, res) {
   try {
     let addr;
@@ -330,7 +312,7 @@ async function kakaoSummaryHandler(req, res) {
         });
     }
 
-    // 1. 필수 정보 조회 (Juso)
+    // 1. 필수 정보 조회 (Juso, Molit)
     const addressInfo = await searchAddress(cleanAddr);
     
     // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
@@ -347,15 +329,7 @@ async function kakaoSummaryHandler(req, res) {
         });
     }
     
-    // 🚨 네이버 Geocoding API를 호출하여 좌표를 획득합니다. (새로 추가)
-    const coords = await getCoordinates(addressInfo.roadAddr);
-    if (!coords) {
-        console.warn("[GEO WARN] 네이버 Geocoding 좌표 획득 실패.");
-    } else {
-        console.log(`[GEO DEBUG] 좌표 획득 성공: ${coords.lat}, ${coords.lon}`);
-    }
-    
-    // 🚨 fetchBuildingRegister 호출 (MOLIT)
+    // 🚨 fetchBuildingRegister 호출 (관리번호 또는 지번)
     const items = await fetchBuildingRegister(addressInfo);
     
     if (items.length === 0) {
@@ -364,7 +338,7 @@ async function kakaoSummaryHandler(req, res) {
             template: {
                 outputs: [{
                     simpleText: {
-                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다.`,
+                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (관리번호 및 지번 조회 실패)`,
                     }
                 }]
             }
@@ -422,7 +396,7 @@ async function kakaoSummaryHandler(req, res) {
 }
 
 
-// 11. 기존 summary 유지
+// 10. 기존 summary 유지
 app.get("/summary", async (req, res) => {
   try {
     const addr = req.query.addr;
@@ -431,10 +405,6 @@ app.get("/summary", async (req, res) => {
     
     if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } 
     
-    // 🚨 네이버 Geocoding 호출 (옵션 2를 위해 추가)
-    const coords = await getCoordinates(addressInfo.roadAddr);
-    if (!coords) { console.warn("[GEO WARN] 좌표 획득 실패."); }
-
     const items = await fetchBuildingRegister(addressInfo);
     const summary = buildSummary(items);
     const multiUse = isMultiUseBuilding(summary);
@@ -482,4 +452,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
