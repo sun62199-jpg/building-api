@@ -79,10 +79,9 @@ async function searchAddress(input) {
 async function getCoordinates(fullAddress) {
   console.log(`[NAVER GEO] 좌표 검색 시도 주소: ${fullAddress}`);
   
-  // 🚨🚨🚨 디버그 로그 추가 🚨🚨🚨
+  // 🚨🚨🚨 디버그 로그 추가 (환경 변수 로드 확인) 🚨🚨🚨
   if (!NAVER_CLIENT_ID || !NAVER_CLIENT_SECRET) {
       console.error("NAVER AUTH ERROR: Client ID or Secret is NOT loaded into the environment variables (process.env). Check your .env file!");
-      // 키가 없으면 401 오류가 확실하므로 에러를 발생시킵니다.
       throw new Error("NAVER_CLIENT_ID 또는 NAVER_CLIENT_SECRET 환경 변수가 로드되지 않았습니다.");
   }
   // 🚨🚨🚨 디버그 로그 끝 🚨🚨🚨
@@ -97,9 +96,8 @@ async function getCoordinates(fullAddress) {
           "X-NCP-APIGW-API-KEY": NAVER_CLIENT_SECRET,
       }
   });
-  // ... (나머지 로직 유지)
-}
 
+  // ✅ 오류 지점 수정: fetch 이후의 로직이 함수 본문 내부에 위치하도록 함
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(`네이버 Geocoding API 오류: HTTP ${res.status} (${errorText.substring(0, 50)}...)`);
@@ -507,4 +505,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
