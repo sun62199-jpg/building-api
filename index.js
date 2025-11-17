@@ -30,7 +30,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. JUSO 주소 검색 (법적 코드 및 관리번호 획득)
+// 4. JUSO 주소 검색 (법적 코드 획득)
 async function searchAddress(input) {
   console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`);
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
@@ -67,46 +67,30 @@ async function searchAddress(input) {
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
-    rawJuso: juso, // 🚨 bdMgtSn (건축물 관리번호) 포함
+    rawJuso: juso, 
   };
 }
 
-// 5. 건축물대장 조회 (관리번호 조회 로직 통합)
+// 5. 건축물대장 조회 (지번 기반 getBrTitleInfo 만 사용)
 async function fetchBuildingRegister(addressInfo) {
-  const bdMgtSn = addressInfo.rawJuso?.bdMgtSn; // 🚨 관리번호 추출
+  // 관리번호(bdMgtSn)는 사용하지 않음
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   
-  let endpoint;
-  let params;
+  const endpoint = "getBrTitleInfo"; // 🚨 가장 안정적인 지번 조회 엔드포인트만 사용
 
-  if (bdMgtSn) {
-    // 🚨 [수정] getBrHnoInfo 대신 getBrTitleInfoApt 시도
-    endpoint = "getBrTitleInfoApt"; 
-    params = {
-      serviceKey: MOLIT_KEY,
-      sigunguCd: sigunguCd,
-      bdMgtSn: bdMgtSn, // 관리번호 사용
-      _type: "json",
-      numOfRows: "100",
-      pageNo: "1",
-    };
-    console.log(`[MOLIT] 관리번호 기반 (Apt) 조회 시도: ${bdMgtSn}`);
-  } else {
-    // 🚨 관리번호가 없을 경우: 기존 지번 기반 조회 유지 (일반 건축물용)
-    endpoint = "getBrTitleInfo";
-    params = {
-      serviceKey: MOLIT_KEY,
-      sigunguCd,
-      bjdongCd,
-      platGbCd: "0",
-      bun,
-      ji,
-      _type: "json",
-      numOfRows: "100",
-      pageNo: "1",
-    };
-     console.log(`[MOLIT] 지번 기반 조회 시도: ${sigunguCd}-${bjdongCd}-${bun}-${ji}`);
-  }
+  const params = {
+    serviceKey: MOLIT_KEY,
+    sigunguCd,
+    bjdongCd,
+    platGbCd: "0",
+    bun,
+    ji,
+    _type: "json",
+    numOfRows: "100",
+    pageNo: "1",
+  };
+  
+  console.log(`[MOLIT] 지번 기반 조회 시도: ${sigunguCd}-${bjdongCd}-${bun}-${ji}`);
 
   const url = new URL(
     `https://apis.data.go.kr/1613000/BldRgstHubService/${endpoint}`
@@ -137,23 +121,44 @@ async function fetchBuildingRegister(addressInfo) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 6. 한글화 & 요약 (Node.js 계산을 위해 데이터 구조 변경)
+// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링)
 function buildSummary(items) {
-  const 다중이용건물 = items.filter(
-    (it) =>
-      [
-        "공동주택",
-        "제2종근린생활시설",
-        "문화 및 집회시설",
-        "종교시설",
-        "판매시설",
-        "운수시설",
-        "의료시설",
-        "숙박시설",
-      ].includes(it.mainPurpsCdNm) ||
-      (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
-  );
+    const CURRENT_YEAR = new Date().getFullYear();
     
+    // 🚨 쌈빢한 필터링 로직: 엉뚱한 건물 제거 🚨
+    const filteredItems = items.filter(it => {
+        const purp = it.mainPurpsCdNm;
+        const useAprYear = Number(it.useAprDay?.substring(0, 4) || 0);
+        
+        // 1. 주용도 필터링: 공동주택/상업지역에 어울리지 않는 엉뚱한 용도 제거
+        if (purp === '공장' || purp === '창고' || purp === '위험물저장및처리시설') {
+            return false;
+        }
+        
+        // 2. 노후도 필터링: 건물이 너무 오래되어 (40년 이상) 현재의 주소에 매칭되기 어려운 경우 제거
+        if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && Number(it.grndFlrCnt) < 5) {
+            return false; 
+        }
+        
+        return true;
+    });
+    
+    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
+    const 다중이용건물 = filteredItems.filter( 
+        (it) =>
+            [
+                "공동주택",
+                "제2종근린생활시설",
+                "문화 및 집회시설",
+                "종교시설",
+                "판매시설",
+                "운수시설",
+                "의료시설",
+                "숙박시설",
+            ].includes(it.mainPurpsCdNm) ||
+            (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
+    );
+        
     // 1. 최고층 수치 계산
     const 최고지상층수 = 다중이용건물.length 
         ? Math.max(...다중이용건물.map(it => Number(it.grndFlrCnt) || 0)) 
@@ -167,18 +172,18 @@ function buildSummary(items) {
     // 3. 가목 해당 용도 (문장 생성을 위한 대표 용도 1개)
     const 가목_용도 = 다중이용건물.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
     
-  return {
-    총건물수: items.length,
-    다중이용건물수: 다중이용건물.length,
-    최고지상층수: 최고지상층수,
-    가목_연면적_합계: 가목_연면적_합계, 
-    가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
-    다중이용건물: 다중이용건물.map((it) => ({
-      용도: it.mainPurpsCdNm,
-      지상층: Number(it.grndFlrCnt),
-      연면적: Number(it.totArea)
-    })),
-  };
+    return {
+        총건물수: filteredItems.length,
+        다중이용건물수: 다중이용건물.length,
+        최고지상층수: 최고지상층수,
+        가목_연면적_합계: 가목_연면적_합계, 
+        가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
+        다중이용건물: 다중이용건물.map((it) => ({
+            용도: it.mainPurpsCdNm,
+            지상층: Number(it.grndFlrCnt),
+            연면적: Number(it.totArea)
+        })),
+    };
 }
 
 // 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
@@ -329,7 +334,7 @@ async function kakaoSummaryHandler(req, res) {
         });
     }
     
-    // 🚨 fetchBuildingRegister 호출 (관리번호 또는 지번)
+    // 🚨 fetchBuildingRegister 호출 (안정적인 지번 조회)
     const items = await fetchBuildingRegister(addressInfo);
     
     if (items.length === 0) {
@@ -338,7 +343,7 @@ async function kakaoSummaryHandler(req, res) {
             template: {
                 outputs: [{
                     simpleText: {
-                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (관리번호 및 지번 조회 실패)`,
+                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (해당 지번에 등록된 건축물 없음)`,
                     }
                 }]
             }
