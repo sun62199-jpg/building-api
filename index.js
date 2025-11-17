@@ -138,7 +138,7 @@ async function fetchBuildingRegister(addressInfo) {
   const url = new URL("https://api.vworld.kr/ned/wfs/getGisGnrlBuildingWFS");
   const params = {
     key: VWORLD_KEY, 
-    domain: "localhost", // 테스트 도메인
+    domain: "building-api-0292.onrender.com", // 테스트 도메인
     service: "WFS",
     version: "1.1.0",
     request: "GetFeature",
@@ -505,3 +505,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
