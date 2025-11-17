@@ -86,7 +86,7 @@ async function getCoordinates(fullAddress) {
   }
   // 🚨🚨🚨 디버그 로그 끝 🚨🚨🚨
 
-  const url = new URL("https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode");
+  const url = new URL("https://maps.apigw.ntruss.com/map-geocode/v2/geocode");
   url.searchParams.append("query", fullAddress);
 
   const res = await fetch(url.toString(), {
@@ -505,4 +505,5 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
 
