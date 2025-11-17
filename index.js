@@ -119,7 +119,7 @@ async function getCoordinates(fullAddress) {
 
 // 6. 🏛️ V-World WFS를 이용한 건축물대장 조회 및 Juso 코드 대조
 async function fetchBuildingRegister(addressInfo) {
-  // 1. 네이버 API로 좌표 획득
+  // 1. 네이버 API로 좌표 획득 (생략)
   const fullAddress = addressInfo.roadAddr;
   const coords = await getCoordinates(fullAddress);
   
@@ -128,25 +128,32 @@ async function fetchBuildingRegister(addressInfo) {
       return [];
   }
   
-  // 2. 좌표를 BBOX 필터로 변환 (작은 검색 영역 설정)
+  // 2. 좌표를 BBOX 필터로 변환 (🚨 BBOX 순서 및 변수명 수정)
   const delta = 0.0001; 
-  const bbox = `${coords.lon - delta},${coords.lat - delta},${coords.lon + delta},${coords.lat + delta}`;
+  // WGS84(EPSG:4326) 명세: (ymin, xmin, ymax, xmax) = (lat_min, lon_min, lat_max, lon_max)
+  const lat_min = coords.lat - delta;
+  const lon_min = coords.lon - delta;
+  const lat_max = coords.lat + delta;
+  const lon_max = coords.lon + delta;
+  
+  const bbox = `${lat_min},${lon_min},${lat_max},${lon_max}`;
 
-  // 3. V-World WFS API 호출 (🚨 공식 기본 URL로 변경)
+  // 3. V-World WFS API 호출 (🚨 파라미터 값 수정)
+  // NOTE: 공식 기본 URL을 사용합니다.
   const url = new URL("https://api.vworld.kr/req/wfs"); 
   
   const params = {
     key: VWORLD_KEY, 
-    // Render 서버에서 구동되므로 도메인 지정
     domain: "building-api-0292.onrender.com", 
     service: "WFS",
     version: "1.1.0",
     request: "GetFeature",
-    // 🚨 API 명세에 따른 typename 사용
-    typename: "gs:GisGnrlBuilding", 
-    outputFormat: "json", 
-    bbox: bbox, 
-    srsName: "EPSG:4326" 
+    typename: "gs:GisGnrlBuilding",
+    // ✅ JSONP가 아닌 공식 JSON 응답 포맷 사용
+    outputFormat: "application/json", 
+    bbox: bbox,
+    // ✅ 네이버 좌표계와 일치하는 WGS84 사용 (EPSG:4326)
+    srsname: "EPSG:4326" 
   };
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
@@ -506,3 +513,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
