@@ -18,7 +18,7 @@ const JUSO_KEY = process.env.JUSO_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
 // 🚨 V-World와 Naver API 키를 환경 변수에서 사용하도록 설정
-const VWORLD_KEY = process.env.VWORLD_KEY || "6436F9DA-35E7-334B-9C08-E5C3E5AACA4A"; // V-World 키 (직접 할당 또는 환경 변수)
+const VWORLD_KEY = process.env.VWORLD_KEY || "6436F9DA-35E7-334B-9C08-E5C3E5AACA4A"; // V-World 키
 const NAVER_CLIENT_ID = process.env.NAVER_CLIENT_ID;
 const NAVER_CLIENT_SECRET = process.env.NAVER_CLIENT_SECRET;
 
@@ -86,6 +86,7 @@ async function getCoordinates(fullAddress) {
   }
   // 🚨🚨🚨 디버그 로그 끝 🚨🚨🚨
 
+  // ✅ 네이버 URL 최종 수정 적용
   const url = new URL("https://maps.apigw.ntruss.com/map-geocode/v2/geocode");
   url.searchParams.append("query", fullAddress);
 
@@ -97,7 +98,6 @@ async function getCoordinates(fullAddress) {
       }
   });
 
-  // ✅ 오류 지점 수정: fetch 이후의 로직이 함수 본문 내부에 위치하도록 함
   if (!res.ok) {
     const errorText = await res.text();
     throw new Error(`네이버 Geocoding API 오류: HTTP ${res.status} (${errorText.substring(0, 50)}...)`);
@@ -129,23 +129,24 @@ async function fetchBuildingRegister(addressInfo) {
   }
   
   // 2. 좌표를 BBOX 필터로 변환 (작은 검색 영역 설정)
-  // ± 0.0001도의 작은 영역을 BBOX로 설정 (약 10m x 10m)
   const delta = 0.0001; 
-  // WFS BBOX 형식: MIN_X, MIN_Y, MAX_X, MAX_Y
   const bbox = `${coords.lon - delta},${coords.lat - delta},${coords.lon + delta},${coords.lat + delta}`;
 
-  // 3. V-World WFS API 호출
-  const url = new URL("https://api.vworld.kr/ned/wfs/getGisGnrlBuildingWFS");
+  // 3. V-World WFS API 호출 (🚨 공식 기본 URL로 변경)
+  const url = new URL("https://api.vworld.kr/req/wfs"); 
+  
   const params = {
     key: VWORLD_KEY, 
-    domain: "building-api-0292.onrender.com", // 테스트 도메인
+    // Render 서버에서 구동되므로 도메인 지정
+    domain: "building-api-0292.onrender.com", 
     service: "WFS",
     version: "1.1.0",
     request: "GetFeature",
-    typename: "gs:GisGnrlBuilding", // 일반 건물 레이어 이름 (가정)
-    outputFormat: "json", // GeoJSON 또는 JSON 응답 요청
-    bbox: bbox, // 좌표 필터링 적용
-    srsName: "EPSG:4326" // WGS84 사용 가정
+    // 🚨 API 명세에 따른 typename 사용
+    typename: "gs:GisGnrlBuilding", 
+    outputFormat: "json", 
+    bbox: bbox, 
+    srsName: "EPSG:4326" 
   };
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
@@ -167,7 +168,7 @@ async function fetchBuildingRegister(addressInfo) {
   const finalItems = features
     .map(feature => feature.properties)
     .filter(props => {
-      // 🚨 V-World 속성 필드 이름이 sig_cd, bjdong_cd, bun, ji 라고 가정하고 대조
+      // V-World 속성 필드 이름 sig_cd, bjdong_cd, bun, ji 를 가정하고 대조
       const vworldSigungu = String(props.sig_cd);
       const vworldBjdong = String(props.bjdong_cd);
       const vworldBun = String(props.bun || '').padStart(4, '0');
@@ -181,7 +182,7 @@ async function fetchBuildingRegister(addressInfo) {
       );
     })
     .map(props => ({
-      // 층수/면적 데이터 추출 및 표준화 (속성명은 V-World GeoJSON 명세에 따름)
+      // 층수/면적 데이터 추출 및 표준화
       mainPurpsCdNm: props.main_purps_nm || '알 수 없음', 
       grndFlrCnt: props.grnd_flr_cnt ? Number(props.grnd_flr_cnt) : 0, // 지상층
       totArea: props.tot_area ? Number(props.tot_area) : 0 // 연면적
@@ -227,7 +228,7 @@ function buildSummary(items) {
     가목_연면적_합계: 가목_연면적_합계, 
     가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
     다중이용건물: 다중이용건물.map((it) => ({
-      용도: it.mainPurpsCdNm,
+       용도: it.mainPurpsCdNm,
       지상층: Number(it.grndFlrCnt),
       연면적: Number(it.totArea)
     })),
@@ -505,5 +506,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
-
