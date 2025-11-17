@@ -30,7 +30,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. JUSO 주소 검색 (법적 코드 획득)
+// 4. JUSO 주소 검색 (법적 코드 및 관리번호 획득)
 async function searchAddress(input) {
   console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`);
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
@@ -76,12 +76,11 @@ async function fetchBuildingRegister(addressInfo) {
   const bdMgtSn = addressInfo.rawJuso?.bdMgtSn; // 🚨 관리번호 추출
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   
-  // 1. 사용할 API 엔드포인트와 파라미터를 결정
-  let endpoint = "getBrTitleInfo"; // 기본값: 지번 조회
+  let endpoint;
   let params;
 
   if (bdMgtSn) {
-    // 🚨 공동주택 관리번호가 있을 경우: 관리번호 기반 조회로 전환
+    // 🚨 공동주택 관리번호가 있을 경우: 관리번호 기반 조회
     endpoint = "getBrHnoInfo"; 
     params = {
       serviceKey: MOLIT_KEY,
@@ -94,6 +93,7 @@ async function fetchBuildingRegister(addressInfo) {
     console.log(`[MOLIT] 관리번호 기반 조회 시도: ${bdMgtSn}`);
   } else {
     // 🚨 관리번호가 없을 경우: 기존 지번 기반 조회 유지 (일반 건축물용)
+    endpoint = "getBrTitleInfo";
     params = {
       serviceKey: MOLIT_KEY,
       sigunguCd,
@@ -338,7 +338,7 @@ async function kakaoSummaryHandler(req, res) {
             template: {
                 outputs: [{
                     simpleText: {
-                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (관리번호 및 지번 조회 실패)`,
+                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (지번 또는 관리번호 조회 실패)`,
                     }
                 }]
             }
