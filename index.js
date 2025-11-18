@@ -525,46 +525,39 @@ ${JSON.stringify(GPT_근거, null, 2)}
 async function llmElevatorJudgment(summary) {
     const { isMultiUse, maxFloor } = summary;
     const resultText = isMultiUse ? "예" : "아니오";
-
-    const prompt = `
-주어진 정보는 건축물대장 대신 승강기 관리 시스템에서 추출한 데이터로, 건물의 다중이용건축물 여부를 판단한 결과입니다.
-당신은 이 정보를 기반으로 정해진 형식의 면책 문구를 포함한 문장을 생성해야 합니다.
-
-**[승강기 데이터 판단 요약]**
-- 최종 판단: ${resultText}
-- 최고 층수: ${maxFloor}층
-
-**[판단 근거 작성 규칙]**
-1.  '다중이용건축물' 키 값은 **${resultText}** 값을 그대로 사용한다.
-2.  판단 근거는 다음 형식 중 하나만을 사용하여 구성한다.
-    * **해당될 경우:** "이 건물은 승강기정보에 최고 지상층수가 ${maxFloor}층으로 16층 이상에 해당되어 다중이용건축물로 판단됩니다. 하지만 건축물대장이 조회되지 않아 정확한 판단은 어렵습니다."
-    * **해당되지 않을 경우:** "이 건물은 승강기정보에 최고 지상층수가 ${maxFloor}층으로 16층 이상에 해당되지 않아 다중이용건축물로 판단되지 않습니다. 하지만 건축물대장이 조회되지 않아 정확한 판단은 어렵습니다."
-`;
+    // ... (prompt 정의 생략) ...
 
     const response = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.1, 
+        temperature: 0.0, // 🚨 수정: 온도를 0.0으로 낮춰 비정형 출력 방지
     });
     let content = response.choices[0].message.content.trim();
 
-    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
+    // 🚨🚨🚨 JSON 강제 추출 로직 유지 🚨🚨🚨
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
         content = jsonMatch[0]; // 중괄호로 감싸진 부분만 사용
     } else {
-        // JSON 구조를 찾지 못한 경우
+        // JSON 구조를 찾지 못한 경우 (최종 실패)
         console.error("LLM (Elevator) JSON 추출 실패: ", content.substring(0, 200));
-        throw new Error("LLM did not return a parsable JSON structure for Elevator.");
+        // throw new Error("LLM did not return a parsable JSON structure for Elevator."); // <-- 치명적 오류 대신 안전 폴백
+        
+        // 🚨 JSON 파싱 오류 시 안전 폴백 값 반환
+        return {
+            다중이용건축물: resultText,
+            판단근거: `AI 응답 형식 오류로 인해 판단 근거 생성 실패. 서버 룰에 따라 ${resultText} 판단. (대장 부재)`
+        };
     }
 
     try {
         return JSON.parse(content);
     } catch (e) {
+        // JSON 파싱은 성공했으나 비정형 데이터 때문에 오류가 난 경우
         console.error("LLM JSON 파싱 오류:", content);
         return {
             다중이용건축물: resultText,
-            판단근거: `AI 응답 형식 오류. 서버의 ${resultText} 판단을 따름.`
+            판단근거: `AI 응답 형식 오류. 서버 룰에 따라 ${resultText} 판단. (대장 부재)`
         };
     }
 }
@@ -699,3 +692,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
