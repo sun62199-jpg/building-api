@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>안전관리자 교육 자동 안내 AI 플랫폼</title>
+    <title>건축물 안전관리 의무교육 자동 안내 AI 플랫폼</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
@@ -50,7 +50,8 @@
             </label>
             <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
                 <input type="text" id="addressInput" placeholder="예: 서울특별시 강남구 테헤란로 123"
-                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm"> <button id="checkButton"
+                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm">
+                <button id="checkButton"
                         class="px-6 py-3 bg-primary text-white font-bold rounded-lg hover:bg-secondary transition duration-300 shadow-md transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50">
                     교육 내용 확인하기
                 </button>
@@ -92,7 +93,7 @@
     <script>
         // --- 교육 구분 상수 (서버 응답을 UI 텍스트로 변환) ---
         const EDUCATION_MULTI = "비상구출운전 및 승강기관리 교육";
-        const EDUCATION_GENERAL = "승강기 관리 교육";
+        const EDUCATION_GENERAL = "승강기 관리 교육 (다중이용 건축물 교육 불필요)";
         const EDUCATION_NONE = "교육 의무 없음 (관련 시설 미보유)";
 
         document.addEventListener('DOMContentLoaded', () => {
@@ -102,9 +103,13 @@
             const loadingIndicator = document.getElementById('loadingIndicator');
             const errorMessage = document.getElementById('errorMessage');
              
-            // 주소 입력창에서 Enter 키 입력 시 조회 버튼 클릭
+            // ✅ 수정: DOM 로드 후 버튼 상태를 확실하게 활성화
+            checkButton.disabled = false; 
+
+            // ✅ 수정: 주소 입력창에서 Enter 키 입력 시 조회 버튼 클릭 이벤트 등록
             addressInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
+                    e.preventDefault(); // 기본 폼 전송 방지
                     checkButton.click();
                 }
             });
@@ -123,7 +128,7 @@
                 }
 
                 // 로딩 시작
-                checkButton.disabled = true;
+                checkButton.disabled = true; // 🚨 여기서 비활성화
                 loadingIndicator.classList.remove('hidden');
                 resultOutput.classList.add('hidden');
 
@@ -144,7 +149,7 @@
                     // --- 결과 데이터 추출 및 매핑 ---
                     const isMultiUse = data.analysis.llmFinalDecision === '예';
                     const maxFloor = data.summaryDetails.최고지상층수;
-                    const hasElevator = true; // 실제 API에서 승강기 정보를 얻어야 하지만, 현재는 디폴트 true 가정
+                    const hasElevator = true; // (현재 코드에서는 승강기 유무 정보를 API에서 직접 가져오지 않으므로, 임시로 true 가정)
                     
                     let educationText;
                     let educationNote = data.analysis.llmReason;
@@ -193,4 +198,23 @@
                             ` : ''}
                             
                             <div class="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
-                                <p>최고 지상층수: ${maxFloor}F | 가목 용도 연면적 합계: ${totalAreaSum}㎡ | 총 건축물 수: ${data.summaryDetails.총건물수}개</p
+                                <p>최고 지상층수: ${maxFloor}F | 가목 용도 연면적 합계: ${totalAreaSum}㎡ | 총 건축물 수: ${data.summaryDetails.총건물수}개</p>
+                            </div>
+                        </div>
+                    `;
+
+                } catch (error) {
+                    console.error("조회 중 오류 발생:", error);
+                    errorMessage.textContent = "데이터 조회 중 예상치 못한 오류가 발생했습니다. 서버 연결 상태를 확인해 주세요.";
+                    errorMessage.classList.remove('hidden');
+                } finally {
+                    // 로딩 종료
+                    loadingIndicator.classList.add('hidden');
+                    checkButton.disabled = false; // 🚨 여기서 활성화 보장
+                    resultOutput.classList.remove('hidden');
+                }
+            });
+        });
+    </script>
+</body>
+</html>
