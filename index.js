@@ -295,125 +295,143 @@ ${JSON.stringify(GPT_근거, null, 2)}
 
 // 9. 카카오톡 스킬용 라우트 (룰 + LLM) - 단일 응답 구조로 최종 복원
 async function kakaoSummaryHandler(req, res) {
-  try {
-    let addr;
-    
-    // 주소 추출 로직
-    if (req.method === "GET") {
-      addr = req.query.addr;
-    } else if (req.method === "POST") {
-      if (req.body && req.body.action && req.body.action.params) {
-        addr = req.body.action.params.addr; 
-      }
-      if (!addr && req.body.addr) {
-        addr = req.body.addr;
-      }
-    }
+  try {
+    let addr;
+    
+    // 주소 추출 로직
+    if (req.method === "GET") {
+      addr = req.query.addr;
+    } else if (req.method === "POST") {
+      if (req.body && req.body.action && req.body.action.params) {
+        addr = req.body.action.params.addr; 
+      }
+      if (!addr && req.body.addr) {
+        addr = req.body.addr;
+      }
+    }
 
-    if (!addr) {
-      return res.status(400).json({
-        version: "2.0",
-        template: {
-          outputs: [{ simpleText: { text: "주소가 필요합니다. 다시 입력해 주세요." } }],
-        },
-      });
-    }
+    if (!addr) {
+      return res.status(400).json({
+        version: "2.0",
+        template: {
+          outputs: [{ simpleText: { text: "주소가 필요합니다. 다시 입력해 주세요." } }],
+        },
+      });
+    }
+    
+    // 🚨 유효성 필터링 강화
+    const cleanAddr = (addr || '').trim(); 
+    if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
+        console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
+        return res.json({
+            version: "2.0",
+            template: {
+                outputs: [{ simpleText: { text: "⚠️ 주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
+            },
+        });
+    }
+
+    // 1. 필수 정보 조회 (Juso, Molit)
+    const addressInfo = await searchAddress(cleanAddr);
+    
+    // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
+    if (!addressInfo) {
+        return res.json({ 
+            version: "2.0",
+            template: {
+                outputs: [{
+                    simpleText: {
+                        text: `⚠️ 죄송합니다. "${cleanAddr}"에 대한 건축물 정보를 찾을 수 없습니다.\n\n주소를 다시 확인해 주세요.`,
+                    }
+                }]
+            }
+        });
+    }
     
-    // 🚨 유효성 필터링 강화
-    const cleanAddr = (addr || '').trim(); 
-    if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
-        console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
+    // 🚨🚨🚨 [추가] 0번지 필터링 로직 (조회 자체가 무의미한 경우 차단) 🚨🚨🚨
+    if (addressInfo.bun === '0000' && addressInfo.ji === '0000') {
+        console.warn(`[ZERO_BUN_WARN] 지번이 0번지(예: 덕계동 0)로 감지되어 MOLIT 조회를 건너뛰고 오류 메시지 반환`);
         return res.json({
             version: "2.0",
             template: {
-                outputs: [{ simpleText: { text: "⚠️ 주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." } }],
-            },
-        });
-    }
-
-    // 1. 필수 정보 조회 (Juso, Molit)
-    const addressInfo = await searchAddress(cleanAddr);
-    
-    // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
-    if (!addressInfo) {
-        return res.json({ 
-            version: "2.0",
-            template: {
                 outputs: [{
                     simpleText: {
-                        text: `⚠️ 죄송합니다. "${cleanAddr}"에 대한 건축물 정보를 찾을 수 없습니다.\n\n주소를 다시 확인해 주세요.`,
+                        text: `⚠️ 죄송합니다. 주소 검색 결과 해당 위치는 지번이 **'0번지'**입니다. 이 주소는 건축물대장 조회가 불가능합니다.`,
                     }
                 }]
             }
         });
     }
-    
-    // 🚨 fetchBuildingRegister 호출 (안정적인 지번 조회)
-    const items = await fetchBuildingRegister(addressInfo);
-    
-    if (items.length === 0) {
-         return res.json({
-            version: "2.0",
-            template: {
-                outputs: [{
-                    simpleText: {
-                        text: `⚠️ 조회는 성공했으나, "${cleanAddr}"에 매칭되는 유효한 건축물대장 정보가 없습니다. (해당 지번에 등록된 건축물 없음)`,
-                    }
-                }]
-            }
-        });
-    }
-    
-    const summary = buildSummary(items);
-    
-    // 2. 룰 기반 판단
-    const ruleResult = isMultiUseBuilding(summary);
-    
-    // 3. LLM 판단 호출
-    const llmResult = await llmJudgment(ruleResult);
-    
-    // 4. 🎨 응답 텍스트 구성
-    const responseText = 
-        `[다중이용건축물 조회 결과]\n` +
-        `조회 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n\n` +
-        
-        `건축법 기반 판단\n` +
-        `다중이용건축물 여부 = ${ruleResult.다중이용건축물 ? 'YES' : 'NO'}\n\n\n` +
-        
-        `AI 전문 분석 (GPT)\n` +
-        `AI 최종 판단 = ${llmResult.다중이용건축물}\n` +
-        `분석 근거 요약 = ${llmResult.판단근거}`;
+    // 🚨🚨🚨 [추가] 0번지 필터링 로직 끝 🚨🚨🚨
+    
+    // 🚨 fetchBuildingRegister 호출 (안정적인 지번 조회)
+    const items = await fetchBuildingRegister(addressInfo);
+    
+    // 🚨 buildSummary 호출 (내부 필터링 실행)
+    const summary = buildSummary(items); 
+    
+    // 🚨🚨🚨 [수정] 필터링 후 유효한 건물이 0개인지 확인 🚨🚨🚨
+    if (summary.총건물수 === 0) {
+         return res.json({
+            version: "2.0",
+            template: {
+                outputs: [{
+                    simpleText: {
+                        // 엉뚱한 건물만 걸러냈으므로, 조회 불가를 명확히 알림
+                        text: `⚠️ 조회는 성공했으나, **유효한 건물**을 찾지 못했습니다. (지번 오류로 인한 불량 데이터 필터링됨)`,
+                    }
+                }]
+            }
+        });
+    }
+    
+    // 2. 룰 기반 판단
+    const ruleResult = isMultiUseBuilding(summary);
+    
+    // 3. LLM 판단 호출
+    const llmResult = await llmJudgment(ruleResult);
+    
+    // 4. 🎨 응답 텍스트 구성
+    const responseText = 
+        `[다중이용건축물 조회 결과]\n` +
+        `조회 주소: ${addressInfo.roadAddr} (${addressInfo.jibun})\n\n\n` +
+        
+        `건축법 기반 판단\n` +
+        `다중이용건축물 여부 = ${ruleResult.다중이용건축물 ? 'YES' : 'NO'}\n\n\n` +
+        
+        `AI 전문 분석 (GPT)\n` +
+        `AI 최종 판단 = ${llmResult.다중이용건축물}\n` +
+        `분석 근거 요약 = ${llmResult.판단근거}`;
 
 
-    // 카카오 스킬용 JSON
-    const responseJSON = {
-        version: "2.0",
-        template: {
-            outputs: [
-                {
-                    simpleText: {
-                        text: responseText
-                    }
-                }
-            ]
-        }
-    };
+    // 카카오 스킬용 JSON
+    const responseJSON = {
+        version: "2.0",
+        template: {
+            outputs: [
+                {
+                    simpleText: {
+                        text: responseText
+                    }
+                }
+            ]
+        }
+    };
 
-    res.json(responseJSON);
+    res.json(responseJSON);
 
-  } catch (err) {
-    console.error("FATAL ERROR IN KAKAO SUMMARY HANDLER (단일 응답):", err);
-    res.status(500).json({
-      version: "2.0",
-      template: {
-        outputs: [
-          { simpleText: { text: `조회 실패: ${String(err)}` } }
-        ]
-      }
-    });
-  }
+  } catch (err) {
+    console.error("FATAL ERROR IN KAKAO SUMMARY HANDLER (단일 응답):", err);
+    res.status(500).json({
+      version: "2.0",
+      template: {
+        outputs: [
+          { simpleText: { text: `조회 실패: ${String(err)}` } }
+        ]
+      }
+    });
+  }
 }
-
 
 // 10. 기존 summary 유지
 app.get("/summary", async (req, res) => {
@@ -471,3 +489,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
