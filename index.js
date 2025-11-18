@@ -1,5 +1,4 @@
-// 1. 기본 세팅_test v.2 251118 20시53분
-// 1. 기본 세팅
+// 1. 기본 세팅_test v.3 251118 20시58분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -72,9 +71,9 @@ async function searchAddress(input) {
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
     // 🚨 승강기 API에 필요한 정보 추가
-    siNm: juso.siNm, 
-    sggNm: juso.sggNm,
-    buldNm: juso.bdNm,
+    siNm: juso.siNm, // 시/도 이름
+    sggNm: juso.sggNm, // 시/군/구 이름
+    buldNm: juso.bdNm, // 건물 이름
     rawJuso: juso, 
   };
 }
@@ -102,7 +101,6 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   const res = await fetch(url.toString());
-  const text = await res.text();
   if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
