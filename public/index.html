@@ -187,20 +187,23 @@
                     // 5. Raw Data Contents (MOLIT 또는 Fallback 요약)
                     let rawDataForViewer;
                     let rawDataSourceName;
+                    let finalBuildingCount;
                     
                     if (data.status === 'ok') {
                         rawDataSourceName = '건축물대장 (MOLIT) 상세';
                         rawDataForViewer = data.summaryDetails.다중이용건물; // MOLIT의 필터링된 목록
+                        finalBuildingCount = data.summaryDetails.총건물수;
                     } else if (data.status === 'ok_fallback') {
                         rawDataSourceName = '승강기 정보 상세 (FALLBACK)';
                         rawDataForViewer = { 
-                            ...data.summaryDetails,
-                            Note: "이 데이터는 퍼지 매칭을 통해 선정된 단일 승강기 항목의 요약입니다."
+                            '최고 지상층수': data.summaryDetails.elevatorMaxFloor,
+                            '총 조회된 승강기 수': data.summaryDetails.elevatorCount,
+                            '판단 근거 (LLM)': decisionNote
+                            // 원본 승강기 API의 items를 넘겨주지 않았으므로 요약만 표시
                         };
+                        finalBuildingCount = data.summaryDetails.elevatorCount;
                     }
                     
-                    const finalBuildingCount = data.summaryDetails.총건물수 || data.summaryDetails.elevatorCount || 0;
-
 
                     // 결과 카드 생성
                     resultOutput.innerHTML = `
@@ -230,7 +233,7 @@
                             
                             <div class="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
                                 <p><strong>조회 주소:</strong> ${data.addressInfo.roadAddr}</p>
-                                <p><strong>최고 지상층수:</strong> ${maxFloor}F | <strong>가목 연면적 합계:</strong> ${totalAreaSum}㎡ | <strong>총 건물 수:</strong> ${finalBuildingCount}개</p>
+                                <p><strong>최고 지상층수:</strong> ${maxFloor}F | <strong>가목 연면적 합계:</strong> ${totalAreaSum}㎡ | <strong>총 건축물 수:</strong> ${finalBuildingCount}개</p>
                                 
                                 <button class="mt-2 text-sm text-blue-600 hover:text-blue-800" onclick="document.getElementById('rawDataCollapse').classList.toggle('hidden')">
                                     ${rawDataSourceName} JSON 원본 보기
