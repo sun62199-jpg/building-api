@@ -1,4 +1,4 @@
-// 1. 기본 세팅_테스트 V2.3 251118_22시10분
+// 1. 기본 세팅 v2.4 221118
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -300,7 +300,6 @@ function getElevatorSummary(elevatorItems) {
     }
 
     // 승강기 정보 기반 판단은 16층 이상 (나목) 기준으로만 진행
-    // 🚨 수정된 필드명: groundFloorCnt -> divGroundFloorCnt
     const maxFloor = Math.max(...elevatorItems.map(item => Number(item.divGroundFloorCnt) || 0));
     const isMultiUse = maxFloor >= 16;
     
@@ -361,31 +360,16 @@ async function fetchBuildingRegister(addressInfo) {
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
-    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
+    // 🚨 필터링 간소화: 불완전 데이터만 제거 🚨
     const filteredItems = items.filter(it => {
-        const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
-        // --- 1. 불완전 데이터 필터링 ---
+        // --- 1. 불완전 데이터 필터링만 유지 ---
         if (totArea === 0 || purpCode === '') {
             if (grndFlrCnt >= 16) return true; 
             return false;
-        }
-
-        // --- 2. 엉뚱한 용도 필터링 ---
-        const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
-        const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
-
-        if (isFactoryOrWarehouseCode || isFactoryOrWarehouseName) {
-            return false;
-        }
-        
-        // --- 3. 노후도 필터링 ---
-        if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
-            return false; 
         }
         
         return true;
@@ -458,7 +442,7 @@ function isMultiUseBuilding(summary) {
     } else {
         GPT_판단_근거 = {
             결과: "아니오",
-            판단_기준: "없"
+            판단_기준: "없음"
         };
     }
 
@@ -496,7 +480,7 @@ ${JSON.stringify(GPT_근거, null, 2)}
     const response = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.1, 
+        temperature: 0.0, // 안정화
     });
     let content = response.choices[0].message.content.trim();
 
@@ -507,7 +491,10 @@ ${JSON.stringify(GPT_근거, null, 2)}
     } else {
         // JSON 구조를 찾지 못한 경우
         console.error("LLM (MOLIT) JSON 추출 실패: ", content.substring(0, 200));
-        throw new Error("LLM did not return a parsable JSON structure for MOLIT.");
+        return { // 안전 폴백
+            다중이용건축물: ruleResult.GPT_근거.결과,
+            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
+        };
     }
 
     try {
@@ -525,39 +512,49 @@ ${JSON.stringify(GPT_근거, null, 2)}
 async function llmElevatorJudgment(summary) {
     const { isMultiUse, maxFloor } = summary;
     const resultText = isMultiUse ? "예" : "아니오";
-    // ... (prompt 정의 생략) ...
+
+    const prompt = `
+주어진 정보는 건축물대장 대신 승강기 관리 시스템에서 추출한 데이터로, 건물의 다중이용건축물 여부를 판단한 결과입니다.
+당신은 이 정보를 기반으로 정해진 형식의 면책 문구를 포함한 문장을 생성해야 합니다.
+
+**[승강기 데이터 판단 요약]**
+- 최종 판단: ${resultText}
+- 최고 층수: ${maxFloor}층
+
+**[판단 근거 작성 규칙]**
+1.  '다중이용건축물' 키 값은 **${resultText}** 값을 그대로 사용한다.
+2.  판단 근거는 다음 형식 중 하나만을 사용하여 구성한다.
+    * **해당될 경우:** "이 건물은 승강기정보에 최고 지상층수가 ${maxFloor}층으로 16층 이상에 해당되어 다중이용건축물로 판단됩니다. 하지만 건축물대장이 조회되지 않아 정확한 판단은 어렵습니다."
+    * **해당되지 않을 경우:** "이 건물은 승강기정보에 최고 지상층수가 ${maxFloor}층으로 16층 이상에 해당되지 않아 다중이용건축물로 판단되지 않습니다. 하지만 건축물대장이 조회되지 않아 정확한 판단은 어렵습니다."
+`;
 
     const response = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.0, // 🚨 수정: 온도를 0.0으로 낮춰 비정형 출력 방지
+        temperature: 0.0, // 안정화
     });
     let content = response.choices[0].message.content.trim();
 
-    // 🚨🚨🚨 JSON 강제 추출 로직 유지 🚨🚨🚨
+    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
         content = jsonMatch[0]; // 중괄호로 감싸진 부분만 사용
     } else {
-        // JSON 구조를 찾지 못한 경우 (최종 실패)
+        // JSON 구조를 찾지 못한 경우
         console.error("LLM (Elevator) JSON 추출 실패: ", content.substring(0, 200));
-        // throw new Error("LLM did not return a parsable JSON structure for Elevator."); // <-- 치명적 오류 대신 안전 폴백
-        
-        // 🚨 JSON 파싱 오류 시 안전 폴백 값 반환
         return {
             다중이용건축물: resultText,
-            판단근거: `AI 응답 형식 오류로 인해 판단 근거 생성 실패. 서버 룰에 따라 ${resultText} 판단. (대장 부재)`
+            판단근거: `AI 응답 형식 오류. 서버의 ${resultText} 판단을 따름. (대장 부재)`
         };
     }
 
     try {
         return JSON.parse(content);
     } catch (e) {
-        // JSON 파싱은 성공했으나 비정형 데이터 때문에 오류가 난 경우
         console.error("LLM JSON 파싱 오류:", content);
         return {
             다중이용건축물: resultText,
-            판단근거: `AI 응답 형식 오류. 서버 룰에 따라 ${resultText} 판단. (대장 부재)`
+            판단근거: `AI 응답 형식 오류. 서버의 ${resultText} 판단을 따름.`
         };
     }
 }
@@ -677,7 +674,7 @@ async function apiSummaryHandler(req, res) {
 }
 
 
-// 10. 기존 summary 유지 (레거시 API, 삭제됨)
+// 10. (레거시 /summary API는 삭제됨)
 
 // GET/POST 모두 단일 핸들러로 연결 (새로운 웹 API)
 app.get("/api/summary", apiSummaryHandler);
@@ -692,4 +689,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
