@@ -1,4 +1,5 @@
-// 1. 기본 세팅 v2.5 221118
+// 1. 기본 세팅 v2.6 221118
+// 1. 기본 세팅
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -360,7 +361,7 @@ async function fetchBuildingRegister(addressInfo) {
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
-    // 🚨 필터링 간소화: 불완전 데이터만 제거 🚨
+    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
         const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
@@ -593,8 +594,11 @@ async function apiSummaryHandler(req, res) {
         // 3. 필터링 및 요약
         const summary = buildSummary(items); 
         
+        // 🚨 CRITICAL FIX: 실질적 Zero Data 감지
+        const summaryIsZero = (summary.최고지상층수 === 0) && (summary.가목_연면적_합계 === 0);
+
         // 🚨 CASE 1: MOLIT Success (Data Found)
-        if (summary.총건물수 > 0) {
+        if (summary.총건물수 > 0 && !summaryIsZero) {
             console.log(`[MAIN-PATH] 건축물대장 정보 ${summary.총건물수}건 확인.`);
             
             const ruleResult = isMultiUseBuilding(summary);
@@ -616,7 +620,7 @@ async function apiSummaryHandler(req, res) {
             });
         } 
         
-        // 🚨 CASE 2: MOLIT Failure (No data found) -> FALLBACK to Elevator API
+        // 🚨 CASE 2: MOLIT Failure (No data found or Data is Garbage) -> FALLBACK to Elevator API
         
         console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도.`);
         
