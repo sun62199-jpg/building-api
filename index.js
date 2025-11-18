@@ -1,4 +1,5 @@
-// 1. 기본 세팅_test v5.3 251118 21시37분
+// 1. 기본 세팅_test v1.0251118 21시50분
+// 1. 기본 세팅
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -121,6 +122,7 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
+
 // 5.2.1 🆕 승강기 정보 검색어 생성 함수 (최종 보강)
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
@@ -158,15 +160,36 @@ function generateElevatorSearchNames(addressInfo) {
 }
 
 
+// 5.2.2 🆕 승강기 정보 파편화 조회 함수
+async function searchElevatorWithFallbackNames(addressInfo) {
+    const searchNames = generateElevatorSearchNames(addressInfo);
+    
+    console.log(`[ELEVATOR-TRY] 건물명 파편화 조회 시도: ${searchNames.join(', ')}`);
+
+    // 시도/시군구는 Juso 결과값 그대로 사용
+    const { siNm, sggNm } = addressInfo;
+
+    for (const name of searchNames) {
+        // 5.2. fetchElevatorInfo를 호출 (엔드포인트는 B553664로 수정된 상태)
+        const result = await fetchElevatorInfo(siNm, sggNm, name);
+        if (result.count > 0) {
+            console.log(`[ELEVATOR-SUCCESS-FALLBACK] '${name}'로 ${result.count}건 검색 성공!`);
+            return result; // 성공하면 즉시 반환
+        }
+    }
+    
+    return { count: 0, items: [] }; // 모든 시도 실패 시
+}
+
+
 // 5.2 🆕 승강기 정보 조회 함수 (B553664 서비스 ID 사용)
 async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     if (!buldNm || !siNm) {
         return { count: 0, items: [] };
     }
     
-    // 🚨 URL 수정: B553664 서비스 ID 사용
-    const ELEVATOR_BASE_URL = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`;
     const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
+    const ELEVATOR_BASE_URL = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`;
 
     const params = {
         serviceKey: ELEVATOR_KEY, 
@@ -184,7 +207,7 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
 
     try {
         const res = await fetch(url.toString());
-        const text = await res.text(); // 🚨 텍스트로 먼저 받기
+        const text = await res.text(); 
 
         if (!res.ok) {
             console.error(`[ELEVATOR-ERROR] HTTP ${res.status} 오류: ${text.substring(0, 50)}...`);
@@ -222,7 +245,32 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
 }
 
 
-// 5. 🆕 메인 함수: 주변 지번까지 확장하여 조회 시도 (MOLIT Primary)
+// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수 (Fallback 전용)
+function getElevatorSummary(elevatorItems) {
+    if (!elevatorItems || elevatorItems.length === 0) {
+        return { isMultiUse: false, maxFloor: 0, reason: "승강기 정보 없음" };
+    }
+
+    // 승강기 정보 기반 판단은 16층 이상 (나목) 기준으로만 진행
+    const maxFloor = Math.max(...elevatorItems.map(item => Number(item.groundFloorCnt) || 0));
+    const isMultiUse = maxFloor >= 16;
+    
+    let reasonText = "";
+    if (isMultiUse) {
+        reasonText = `최고 지상층수 ${maxFloor}층 (나목 기준 충족)`;
+    } else {
+        reasonText = `최고 지상층수 ${maxFloor}층 (나목 기준 미달)`;
+    }
+
+    return {
+        isMultiUse: isMultiUse,
+        maxFloor: maxFloor,
+        reason: reasonText
+    };
+}
+
+
+// 5. 🔄 메인 함수: 주변 지번까지 확장하여 조회 시도 (MOLIT Primary)
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   
@@ -513,7 +561,7 @@ async function apiSummaryHandler(req, res) {
         
         console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도.`);
         
-        // 2-1. 승강기 정보 파편화 조회 함수로 대체 (건물명 파편화하여 시도)
+        // 2-1. 승강기 정보 파편화 조회 함수로 대체
         const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
         
         // 2-2. 🚨 Elevator Data Found -> Custom Judgment
@@ -541,9 +589,12 @@ async function apiSummaryHandler(req, res) {
         }
         
         // 2-3. 🚨 Final Failure
+        const isZeroJibeon = addressInfo.bun === '0000' && addressInfo.ji === '0000';
         return res.status(404).json({
             error: "건축물대장 및 승강기 등록 정보를 찾을 수 없습니다.",
-            detail: "주변 지번까지 확장하여 조회했으나, 유효한 건축물대장 정보와 승강기 등록 정보가 모두 없습니다."
+            detail: isZeroJibeon 
+                ? "해당 주소는 지번이 '0번지'이며, 승강기 등록 정보도 없어 건물 존재 여부를 확인할 수 없습니다."
+                : "주변 지번까지 확장하여 조회했으나, 유효한 건축물대장 정보와 승강기 등록 정보가 모두 없습니다."
         });
 
 
