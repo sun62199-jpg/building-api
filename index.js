@@ -5,7 +5,7 @@ require("dotenv").config();
 
 // node-fetch v3(CommonJS에서 ESM 사용)
 const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 // OpenAI CommonJS 방식
 const OpenAI = require("openai");
@@ -19,9 +19,9 @@ const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
-  console.warn(
-    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY 필요"
-  );
+  console.warn(
+    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY 필요"
+  );
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
@@ -32,229 +32,271 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // 4. JUSO 주소 검색 (법적 코드 획득)
 async function searchAddress(input) {
-  console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`);
-  const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
-  const params = {
-    confmKey: JUSO_KEY,
-    currentPage: "1",
-    countPerPage: "5",
-    keyword: input,
-    resultType: "json",
-  };
-  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+  console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`);
+  const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
+  const params = {
+    confmKey: JUSO_KEY,
+    currentPage: "1",
+    countPerPage: "5",
+    keyword: input,
+    resultType: "json",
+  };
+  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`주소 검색 API 오류: HTTP ${res.status}`);
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error(`주소 검색 API 오류: HTTP ${res.status}`);
 
-  const data = await res.json();
-  if (!data.results || data.results.common.errorCode !== "0") {
-    throw new Error(
-      `주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`
-    );
-  }
+  const data = await res.json();
+  if (!data.results || data.results.common.errorCode !== "0") {
+    throw new Error(
+      `주소 검색 실패: ${data.results?.common?.errorMessage || "알 수 없는 오류"}`
+    );
+  }
 
-  const juso = data.results.juso[0];
-  if (!juso) {
-    console.warn(`[JUSO WARN] 검색 결과 없음: ${input}`);
-    return null;
-  }
+  const juso = data.results.juso[0];
+  if (!juso) {
+    console.warn(`[JUSO WARN] 검색 결과 없음: ${input}`);
+    return null;
+  }
 
-  const admCd = juso.admCd;
-  return {
-    sigunguCd: admCd.substring(0, 5),
-    bjdongCd: admCd.substring(5, 10),
-    bun: String(juso.lnbrMnnm || "").padStart(4, "0"),
-    ji: String(juso.lnbrSlno || "").padStart(4, "0"),
-    jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
-    roadAddr: juso.roadAddr,
-    rawJuso: juso, 
-  };
+  const admCd = juso.admCd;
+  return {
+    sigunguCd: admCd.substring(0, 5),
+    bjdongCd: admCd.substring(5, 10),
+    bun: String(juso.lnbrMnnm || "").padStart(4, "0"),
+    ji: String(juso.lnbrSlno || "").padStart(4, "0"),
+    jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
+    roadAddr: juso.roadAddr,
+    rawJuso: juso, 
+  };
 }
 
-// 5. 건축물대장 조회 (지번 기반 getBrTitleInfo 만 사용)
+// 5.1 🚨 보조 함수: 단일 지번으로 MOLIT API 호출
+async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
+  const endpoint = "getBrTitleInfo"; 
+
+  const params = {
+    serviceKey: MOLIT_KEY,
+    sigunguCd,
+    bjdongCd,
+    platGbCd: "0",
+    bun,
+    ji,
+    _type: "json",
+    numOfRows: "100",
+    pageNo: "1",
+  };
+  
+  const url = new URL(
+    `https://apis.data.go.kr/1613000/BldRgstHubService/${endpoint}`
+  );
+  
+  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+
+  const res = await fetch(url.toString());
+  const text = await res.text();
+  if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
+
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    throw new Error("건축물대장 JSON 파싱 실패 → " + text);
+  }
+
+  const header = data.response?.header;
+  // totalCount가 0인 경우를 처리하기 위해 resultCode 00만 검사
+  if (!header || header.resultCode !== "00") {
+    // 00이 아니면 (예: 03-데이터 없음, 99-오류 등) 무조건 빈 배열 반환
+    return []; 
+  }
+
+  // 단일 항목일 경우 배열이 아닌 객체로 오는 경우가 있어 배열로 통합
+  const rawItems = data.response?.body?.items?.item;
+  if (!rawItems) return [];
+  return Array.isArray(rawItems) ? rawItems : [rawItems];
+}
+
+// 5. 🔄 메인 함수: 주변 지번까지 확장하여 조회 시도
 async function fetchBuildingRegister(addressInfo) {
-  const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
-  
-  const endpoint = "getBrTitleInfo"; // 🚨 가장 안정적인 지번 조회 엔드포인트만 사용
+  const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
+  
+  // 1. 부번(ji)을 숫자로 변환
+  const baseJiNumber = Number(ji); 
+  const currentBun = bun; // 본번은 고정
 
-  const params = {
-    serviceKey: MOLIT_KEY,
-    sigunguCd,
-    bjdongCd,
-    platGbCd: "0",
-    bun,
-    ji,
-    _type: "json",
-    numOfRows: "100",
-    pageNo: "1",
-  };
-  
-  console.log(`[MOLIT] 지번 기반 조회 시도: ${sigunguCd}-${bjdongCd}-${bun}-${ji}`);
+  // 2. 조회할 부번 목록 생성 (기본: -2, -1, 0, +1, +2)
+  // ji가 4자리로 패딩되어 있으므로, 0002를 받으면 2로 변환됨.
+  const jiOffsets = [-2, -1, 0, 1, 2]; 
 
-  const url = new URL(
-    `https://apis.data.go.kr/1613000/BldRgstHubService/${endpoint}`
-  );
-  
-  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+  let allItems = [];
+  
+  // 3. 순차적으로 API 호출 및 데이터 획득
+  for (const offset of jiOffsets) {
+    const targetJiNumber = baseJiNumber + offset;
 
-  const res = await fetch(url.toString());
-  const text = await res.text();
-  if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
+    // 부번이 음수가 되거나 9999를 초과하지 않도록 방어 (부번은 4자리)
+    if (targetJiNumber < 0 || targetJiNumber > 9999) continue; 
+    
+    // 타겟 부번을 다시 4자리 문자열로 패딩
+    const targetJi = String(targetJiNumber).padStart(4, '0');
 
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch (e) {
-    throw new Error("건축물대장 JSON 파싱 실패 → " + text);
-  }
+    console.log(`[MOLIT-MULTI] 지번 조회 시도: ${currentBun}-${targetJi}`);
+    
+    try {
+      const items = await callMolitApiSingle(sigunguCd, bjdongCd, currentBun, targetJi);
+      
+      if (items.length > 0) {
+        // 데이터가 발견되면 병합하고, 나머지 조회를 중단합니다.
+        // 현재는 단일 조회 결과를 반환하는 것으로 단순화
+        console.log(`[MOLIT-SUCCESS] ${currentBun}-${targetJi}에서 유효한 데이터 발견. 조회 중단.`);
+        allItems.push(...items); 
+        // 🚨 인접 번지에서 데이터를 찾았으면 해당 결과만 반환하고 루프 종료
+        return allItems;
+      }
+    } catch (error) {
+      // API 오류 발생 시, 이 주소에 대한 조회 전체를 실패로 처리
+      throw new Error(`주변 지번 조회 중 치명적 오류: ${error.message}`);
+    }
+  }
 
-  const header = data.response?.header;
-  if (!header || header.resultCode !== "00")
-    throw new Error(
-      `건축물대장 조회 실패: ${header?.resultMsg || "알 수 없는 오류"}`
-    );
-
-  // 단일 항목일 경우 배열이 아닌 객체로 오는 경우가 있어 배열로 통합
-  const rawItems = data.response?.body?.items?.item;
-  if (!rawItems) return [];
-  return Array.isArray(rawItems) ? rawItems : [rawItems];
+  // 모든 주변 지번 조회 실패 시
+  return allItems;
 }
+
 
 // 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링)
 function buildSummary(items) {
-    const CURRENT_YEAR = new Date().getFullYear();
-    
-    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
-    const filteredItems = items.filter(it => {
-        const purpName = it.mainPurpsCdNm?.trim() || ''; // 주용도 이름 (공백 제거)
-        const purpCode = it.mainPurpsCd?.trim() || ''; // 🚨 주용도 코드 (필수 확인)
-        const totArea = Number(it.totArea) || 0;
-        const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
-        
-        // --- 1. 불완전 데이터 필터링 ---
-        // 연면적이 0이거나 주용도 코드가 빈 값인 경우 제거
-        if (totArea === 0 || purpCode === '') {
-            // 단, 지상층수가 16층 이상이면 공동주택일 수 있으므로 예외 처리
-            if (grndFlrCnt >= 16) return true; 
-            return false; // 불완전 데이터 제거
-        }
+    const CURRENT_YEAR = new Date().getFullYear();
+    
+    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
+    const filteredItems = items.filter(it => {
+        const purpName = it.mainPurpsCdNm?.trim() || ''; // 주용도 이름 (공백 제거)
+        const purpCode = it.mainPurpsCd?.trim() || ''; // 🚨 주용도 코드 (필수 확인)
+        const totArea = Number(it.totArea) || 0;
+        const grndFlrCnt = Number(it.grndFlrCnt) || 0;
+        const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
+        
+        // --- 1. 불완전 데이터 필터링 ---
+        if (totArea === 0 || purpCode === '') {
+            if (grndFlrCnt >= 16) return true; // 16층 이상은 예외 처리
+            return false; // 불완전 데이터 제거
+        }
 
-        // --- 2. 엉뚱한 용도 필터링 (코드/이름 모두 검사) ---
-        // 공장 코드: 17000, 창고 코드: 21000 (MOLIT 명세 기준)
-        const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
-        const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
+        // --- 2. 엉뚱한 용도 필터링 (코드/이름 모두 검사) ---
+        const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
+        const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
 
-        if (isFactoryOrWarehouseCode || isFactoryOrWarehouseName) {
-            return false; // 엉뚱한 용도의 건물 제거
-        }
-        
-        // --- 3. 노후도 필터링 (새로운 건물에 맞지 않는 오래된 저층 건물을 제거) ---
-        if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
-            return false; 
-        }
-        
-        return true;
-    });
-    
-    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
-    const 다중이용건물 = filteredItems.filter( 
-        (it) =>
-            [
-                "공동주택",
-                "제2종근린생활시설",
-                "문화 및 집회시설",
-                "종교시설",
-                "판매시설",
-                "운수시설",
-                "의료시설",
-                "숙박시설",
-            ].includes(it.mainPurpsCdNm) ||
-            (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
-    );
-        
-    // 1. 최고층 수치 계산
-    const 최고지상층수 = 다중이용건물.length 
-        ? Math.max(...다중이용건물.map(it => Number(it.grndFlrCnt) || 0)) 
-        : 0;
+        if (isFactoryOrWarehouseCode || isFactoryOrWarehouseName) {
+            return false; // 엉뚱한 용도의 건물 제거
+        }
+        
+        // --- 3. 노후도 필터링 ---
+        if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
+            return false; 
+        }
+        
+        return true;
+    });
+    
+    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
+    const 다중이용건물 = filteredItems.filter( 
+        (it) =>
+            [
+                "공동주택",
+                "제2종근린생활시설",
+                "문화 및 집회시설",
+                "종교시설",
+                "판매시설",
+                "운수시설",
+                "의료시설",
+                "숙박시설",
+            ].includes(it.mainPurpsCdNm) ||
+            (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
+    );
+        
+    // 1. 최고층 수치 계산
+    const 최고지상층수 = 다중이용건물.length 
+        ? Math.max(...다중이용건물.map(it => Number(it.grndFlrCnt) || 0)) 
+        : 0;
 
-    // 2. 가목 해당 용도의 연면적 합계 계산
-    const 가목_연면적_합계 = 다중이용건물
-        .filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm))
-        .reduce((sum, item) => sum + Number(item.totArea), 0);
-    
-    // 3. 가목 해당 용도 (문장 생성을 위한 대표 용도 1개)
-    const 가목_용도 = 다중이용건물.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
-    
-    return {
-        총건물수: filteredItems.length,
-        다중이용건물수: 다중이용건물.length,
-        최고지상층수: 최고지상층수,
-        가목_연면적_합계: 가목_연면적_합계, 
-        가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
-        다중이용건물: 다중이용건물.map((it) => ({
-            용도: it.mainPurpsCdNm,
-            지상층: Number(it.grndFlrCnt),
-            연면적: Number(it.totArea)
-        })),
-    };
+    // 2. 가목 해당 용도의 연면적 합계 계산
+    const 가목_연면적_합계 = 다중이용건물
+        .filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm))
+        .reduce((sum, item) => sum + Number(item.totArea), 0);
+    
+    // 3. 가목 해당 용도 (문장 생성을 위한 대표 용도 1개)
+    const 가목_용도 = 다중이용건물.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
+    
+    return {
+        총건물수: filteredItems.length,
+        다중이용건물수: 다중이용건물.length,
+        최고지상층수: 최고지상층수,
+        가목_연면적_합계: 가목_연면적_합계, 
+        가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
+        다중이용건물: 다중이용건물.map((it) => ({
+            용도: it.mainPurpsCdNm,
+            지상층: Number(it.grndFlrCnt),
+            연면적: Number(it.totArea)
+        })),
+    };
 }
 
 // 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
 function isMultiUseBuilding(summary) {
-    const multiUseAreaThreshold = 5000;
-    const 최고지상층수 = summary.최고지상층수 || 0;
-    const 가목_합계 = summary.가목_연면적_합계 || 0;
-    
-    // 1. 나목 해당 여부 (가목 용도 외 모든 건물 16층 이상)
-    const 나목_해당 = 최고지상층수 >= 16;
-    
-    // 2. 가목 해당 여부
-    const 가목_해당 = 가목_합계 >= multiUseAreaThreshold;
-    
-    // GPT가 문장을 만들도록 최종 근거 데이터 생성
-    let GPT_판단_근거 = {};
+    const multiUseAreaThreshold = 5000;
+    const 최고지상층수 = summary.최고지상층수 || 0;
+    const 가목_합계 = summary.가목_연면적_합계 || 0;
+    
+    // 1. 나목 해당 여부 (가목 용도 외 모든 건물 16층 이상)
+    const 나목_해당 = 최고지상층수 >= 16;
+    
+    // 2. 가목 해당 여부
+    const 가목_해당 = 가목_합계 >= multiUseAreaThreshold;
+    
+    // GPT가 문장을 만들도록 최종 근거 데이터 생성
+    let GPT_판단_근거 = {};
 
-    if (가목_해당) {
-        // 가목 해당 시 나목 무시 (가목이 더 엄격한 기준)
-        GPT_판단_근거 = {
-            결과: "예",
-            판단_기준: "가목",
-            가목_용도: summary.가목_대표_용도,
-            가목_연면적: 가목_합계.toFixed(2)
-        };
-    } else if (나목_해당) {
-        // 나목 해당 시 (가목에 해당하지 않으므로)
-        GPT_판단_근거 = {
-            결과: "예",
-            판단_기준: "나목",
-            최고층: 최고지상층수
-        };
-    } else {
-        // 둘 다 해당 없음
-        GPT_판단_근거 = {
-            결과: "아니오",
-            판단_기준: "없음"
-        };
-    }
+    if (가목_해당) {
+        // 가목 해당 시 나목 무시 (가목이 더 엄격한 기준)
+        GPT_판단_근거 = {
+            결과: "예",
+            판단_기준: "가목",
+            가목_용도: summary.가목_대표_용도,
+            가목_연면적: 가목_합계.toFixed(2)
+        };
+    } else if (나목_해당) {
+        // 나목 해당 시 (가목에 해당하지 않으므로)
+        GPT_판단_근거 = {
+            결과: "예",
+            판단_기준: "나목",
+            최고층: 최고지상층수
+        };
+    } else {
+        // 둘 다 해당 없음
+        GPT_판단_근거 = {
+            결과: "아니오",
+            판단_기준: "없음"
+        };
+    }
 
-    const 결과 = 가목_해당 || 나목_해당;
+    const 결과 = 가목_해당 || 나목_해당;
 
-    return {
-        다중이용건축물: 결과,
-        판단이유: 결과 
-            ? `가목: ${가목_해당 ? '해당' : '없음'}, 나목: ${나목_해당 ? '해당' : '없음'}`
-            : "가목·나목 해당 없음",
-        // 🚨 GPT가 문장만 생성하도록 최종 판단 근거 데이터 전달
-        GPT_근거: GPT_판단_근거
-    };
+    return {
+        다중이용건축물: 결과,
+        판단이유: 결과 
+            ? `가목: ${가목_해당 ? '해당' : '없음'}, 나목: ${나목_해당 ? '해당' : '없음'}`
+            : "가목·나목 해당 없음",
+        // 🚨 GPT가 문장만 생성하도록 최종 판단 근거 데이터 전달
+        GPT_근거: GPT_판단_근거
+    };
 }
 
 // 8. LLM 판단 (계산된 결과로 문장만 생성하는 역할로 축소)
 async function llmJudgment(ruleResult) { // ruleResult 객체를 인수로 받음
-    const { GPT_근거 } = ruleResult;
-    
-    const prompt = `
+    const { GPT_근거 } = ruleResult;
+    
+    const prompt = `
 주어진 JSON 데이터는 건축물의 다중이용건축물 여부를 서버가 최종 판단한 결과입니다.
 당신의 역할은 이 결과를 바탕으로 정해진 형식의 '판단근거' 문장을 생성하는 것입니다.
 계산을 수행하지 말고, 오직 주어진 GPT_근거 데이터만을 사용하여 문장을 생성해야 합니다.
@@ -263,34 +305,34 @@ async function llmJudgment(ruleResult) { // ruleResult 객체를 인수로 받�
 ${JSON.stringify(GPT_근거, null, 2)}
 
 **[판단 근거 작성 규칙]**
-1.  '다중이용건축물' 키 값은 **GPT_근거.결과** 값을 그대로 사용한다.
-2.  판단 근거는 아래 형식 중 **하나만을 사용**하여 단정적인 문장 하나로 구성한다.
+1.  '다중이용건축물' 키 값은 **GPT_근거.결과** 값을 그대로 사용한다.
+2.  판단 근거는 아래 형식 중 **하나만을 사용**하여 단정적인 문장 하나로 구성한다.
 
-    * **나목 해당 시 형식:** "이 건물은 ${GPT_근거.최고층}층 이므로 다중이용건축물에 해당됩니다."
-    * **가목 해당 시 형식:** "이 건물은 다중이용건축물 기준 중 **${GPT_근거.가목_용도}(굵은글씨)**로 해당되고, 연면적이 ${GPT_근거.가목_연면적}㎡이기 때문에 다중이용건축물에 해당됩니다."
-    * **해당 없을 시 형식:** "이 건물은 다중이용건축물 기준(가목, 나목)에 해당되지 않습니다."
+    * **나목 해당 시 형식:** "이 건물은 ${GPT_근거.최고층}층 이므로 다중이용건축물에 해당됩니다."
+    * **가목 해당 시 형식:** "이 건물은 다중이용건축물 기준 중 **${GPT_근거.가목_용도}(굵은글씨)**로 해당되고, 연면적이 ${GPT_근거.가목_연면적}㎡이기 때문에 다중이용건축물에 해당됩니다."
+    * **해당 없을 시 형식:** "이 건물은 다중이용건축물 기준(가목, 나목)에 해당되지 않습니다."
 
 출력 예시:
 { "다중이용건축물": "예", "판단근거": "이 건물은 29층 이므로 다중이용건축물에 해당됩니다." }
 `;
 
-    // 🚨 LLM 호출 
-    const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1, 
-    });
-    const content = response.choices[0].message.content;
+    // 🚨 LLM 호출 
+    const response = await openai.chat.completions.create({
+        model: "gpt-3.5-turbo",
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.1, 
+    });
+    const content = response.choices[0].message.content;
 
-    try {
-        return JSON.parse(content);
-    } catch (e) {
-        console.error("LLM JSON 파싱 오류:", content);
-        return {
-            다중이용건축물: ruleResult.GPT_근거.결과,
-            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
-        };
-    }
+    try {
+        return JSON.parse(content);
+    } catch (e) {
+        console.error("LLM JSON 파싱 오류:", content);
+        return {
+            다중이용건축물: ruleResult.GPT_근거.결과,
+            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
+        };
+    }
 }
 
 // 9. 웹 클라이언트용 통합 분석 API (카카오톡 라우터 대체)
@@ -330,7 +372,7 @@ async function apiSummaryHandler(req, res) {
             });
         }
         
-        // 2. 건축물대장 조회
+        // 2. 건축물대장 조회 (주변 지번까지 포함하여 조회)
         const items = await fetchBuildingRegister(addressInfo);
         
         // 3. 필터링 및 요약
@@ -377,45 +419,45 @@ async function apiSummaryHandler(req, res) {
 
 // 10. 기존 summary 유지 (레거시 API)
 app.get("/summary", async (req, res) => {
-  try {
-    const addr = req.query.addr;
-    if (!addr) return res.status(400).json({ error: "주소 필요" });
-    const addressInfo = await searchAddress(addr);
-    
-    if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } 
-    
-    const items = await fetchBuildingRegister(addressInfo);
-    const summary = buildSummary(items);
-    const multiUse = isMultiUseBuilding(summary);
+    try {
+        const addr = req.query.addr;
+        if (!addr) return res.status(400).json({ error: "주소 필요" });
+        const addressInfo = await searchAddress(addr);
+        
+        if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } 
+        
+        const items = await fetchBuildingRegister(addressInfo);
+        const summary = buildSummary(items);
+        const multiUse = isMultiUseBuilding(summary);
 
-    const 최고지상층수 = summary.최고지상층수 || 0; 
+        const 최고지상층수 = summary.최고지상층수 || 0; 
 
-    const GA_TYPES = [
-      "문화 및 집회시설",
-      "종교시설",
-      "판매시설",
-      "운수시설",
-      "의료시설",
-      "숙박시설",
-    ];
-    const 가항목 = {};
-    const multiUseAreaThreshold = 5000;
-    GA_TYPES.forEach((type) => {
-      const 대상 = summary.다중이용건물.filter(
-        (it) => it.용도 === type && it.연면적 >= multiUseAreaThreshold
-      );
-      가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
-    });
+        const GA_TYPES = [
+            "문화 및 집회시설",
+            "종교시설",
+            "판매시설",
+            "운수시설",
+            "의료시설",
+            "숙박시설",
+        ];
+        const 가항목 = {};
+        const multiUseAreaThreshold = 5000;
+        GA_TYPES.forEach((type) => {
+            const 대상 = summary.다중이용건물.filter(
+                (it) => it.용도 === type && it.연면적 >= multiUseAreaThreshold
+            );
+            가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
+        });
 
-    res.json({
-      주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
-      다중이용건축물: multiUse.다중이용건축물 ? "예" : "아니오",
-      판단근거: { 가: 가항목, 나: { 최고지상층수 } },
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "조회 실패", detail: String(err) });
-  }
+        res.json({
+            주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
+            다중이용건축물: multiUse.다중이용건축물 ? "예" : "아니오",
+            판단근거: { 가: 가항목, 나: { 최고지상층수 } },
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "조회 실패", detail: String(err) });
+    }
 });
 
 // GET/POST 모두 단일 핸들러로 연결 (새로운 웹 API)
@@ -424,10 +466,12 @@ app.post("/api/summary", apiSummaryHandler);
 
 // 루트
 app.get("/", (req, res) =>
-  res.sendFile(path.join(__dirname, "public/index.html"))
+    res.sendFile(path.join(__dirname, "public/index.html"))
 );
 
 // 서버 시작
 app.listen(PORT, () =>
-  console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
+    console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
+
