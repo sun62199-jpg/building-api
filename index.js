@@ -1,5 +1,4 @@
-// 1. 기본 세팅_test v1.0251118 21시50분
-// 1. 기본 세팅
+// 1. 기본 세팅_test v2.0 251118 21시54분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -245,8 +244,50 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
 }
 
 
-// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수 (Fallback 전용)
+// 5.3.1 🆕 퍼지 매칭 헬퍼 (유사도 계산)
+function normalizeString(str) {
+    return (str || '').replace(/\s/g, '').toUpperCase();
+}
+
+function calculateSimilarity(str1, str2) {
+    const s1 = normalizeString(str1);
+    const s2 = normalizeString(str2);
+    const len1 = s1.length;
+    const len2 = s2.length;
+    if (len1 === 0 || len2 === 0) return 0;
+
+    let matchCount = 0;
+    const minLength = Math.min(len1, len2);
+    for (let i = 0; i < minLength; i++) {
+        if (s1[i] === s2[i]) {
+            matchCount++;
+        }
+    }
+    return matchCount / Math.max(len1, len2); 
+}
+
+// 5.3.2 🆕 가장 유사한 항목 1개 선정
+function findBestMatchingElevator(targetName, elevatorItems) {
+    let bestMatch = null;
+    let maxScore = -1;
+
+    for (const item of elevatorItems) {
+        // Elevator API의 건물명 필드(buldNm)를 사용한다고 가정
+        const candidateName = item.buldNm; 
+        const score = calculateSimilarity(targetName, candidateName);
+
+        if (score > maxScore) {
+            maxScore = score;
+            bestMatch = item;
+        }
+    }
+    return bestMatch;
+}
+
+
+// 5.4 🆕 승강기 정보 기반 요약 및 판단 함수 (Fallback 전용)
 function getElevatorSummary(elevatorItems) {
+    // Note: 이 함수는 MOLIT 데이터가 없을 때만 호출됨
     if (!elevatorItems || elevatorItems.length === 0) {
         return { isMultiUse: false, maxFloor: 0, reason: "승강기 정보 없음" };
     }
@@ -566,7 +607,17 @@ async function apiSummaryHandler(req, res) {
         
         // 2-2. 🚨 Elevator Data Found -> Custom Judgment
         if (elevatorResult.count > 0) {
-            const elevatorSummary = getElevatorSummary(elevatorResult.items);
+            const bestElevatorItem = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
+            
+            // 만약 유사도가 너무 낮아 적합한 건물을 찾을 수 없다면 최종 실패로 처리
+            if (!bestElevatorItem) {
+                 return res.status(404).json({
+                    error: "승강기 정보 조회 성공 후, 건물명 일치 여부를 확인할 수 없습니다.",
+                    detail: `총 ${elevatorResult.count}건의 승강기 정보가 있으나, '${addressInfo.buldNm}'와 일치하는 건물을 찾을 수 없습니다.`
+                });
+            }
+
+            const elevatorSummary = getElevatorSummary([bestElevatorItem]); // 단일 항목으로 요약
             const llmResult = await llmElevatorJudgment(elevatorSummary);
             
             // Custom Success Response with Disclaimer
