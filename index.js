@@ -1,4 +1,4 @@
-// 1. 기본 세팅_테스트 V2.1 251118_22시00분
+// 1. 기본 세팅_테스트 V2.3 251118_22시10분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -121,7 +121,6 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-
 // 5.2.1 🆕 승강기 정보 검색어 생성 함수 (최종 보강)
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
@@ -179,7 +178,6 @@ async function searchElevatorWithFallbackNames(addressInfo) {
             console.log(`[ELEVATOR-SUCCESS-COLLECT] '${name}'로 ${result.count}건 검색 성공. 전체 수집 중.`);
             allItems.push(...result.items); // 결과를 배열에 추가
             totalCount += result.count;
-            // 🚨 여기서 바로 반환하지 않고 다음 검색어로 넘어갑니다.
         }
     }
     
@@ -278,7 +276,10 @@ function findBestMatchingElevator(targetName, elevatorItems) {
     let bestMatch = null;
     let maxScore = -1;
 
-    for (const item of elevatorItems) {
+    // 중복 제거 및 필터링
+    const uniqueItems = Array.from(new Map(elevatorItems.map(item => [item.elevatorNo, item])).values());
+
+    for (const item of uniqueItems) {
         // Elevator API의 건물명 필드(buldNm)를 사용한다고 가정
         const candidateName = item.buldNm; 
         const score = calculateSimilarity(targetName, candidateName);
@@ -294,7 +295,6 @@ function findBestMatchingElevator(targetName, elevatorItems) {
 
 // 5.4 🆕 승강기 정보 기반 요약 및 판단 함수 (Fallback 전용)
 function getElevatorSummary(elevatorItems) {
-    // Note: 이 함수는 MOLIT 데이터가 없을 때만 호출됨
     if (!elevatorItems || elevatorItems.length === 0) {
         return { isMultiUse: false, maxFloor: 0, reason: "승강기 정보 없음" };
     }
@@ -458,7 +458,7 @@ function isMultiUseBuilding(summary) {
     } else {
         GPT_판단_근거 = {
             결과: "아니오",
-            판단_기준: "없음"
+            판단_기준: "없"
         };
     }
 
@@ -498,7 +498,17 @@ ${JSON.stringify(GPT_근거, null, 2)}
         messages: [{ role: "user", content: prompt }],
         temperature: 0.1, 
     });
-    const content = response.choices[0].message.content;
+    let content = response.choices[0].message.content.trim();
+
+    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        content = jsonMatch[0]; // 중괄호로 감싸진 부분만 사용
+    } else {
+        // JSON 구조를 찾지 못한 경우
+        console.error("LLM (MOLIT) JSON 추출 실패: ", content.substring(0, 200));
+        throw new Error("LLM did not return a parsable JSON structure for MOLIT.");
+    }
 
     try {
         return JSON.parse(content);
@@ -536,19 +546,28 @@ async function llmElevatorJudgment(summary) {
         messages: [{ role: "user", content: prompt }],
         temperature: 0.1, 
     });
-    const content = response.choices[0].message.content;
+    let content = response.choices[0].message.content.trim();
+
+    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        content = jsonMatch[0]; // 중괄호로 감싸진 부분만 사용
+    } else {
+        // JSON 구조를 찾지 못한 경우
+        console.error("LLM (Elevator) JSON 추출 실패: ", content.substring(0, 200));
+        throw new Error("LLM did not return a parsable JSON structure for Elevator.");
+    }
 
     try {
         return JSON.parse(content);
     } catch (e) {
-        console.error("LLM (Elevator) JSON 파싱 오류:", content);
+        console.error("LLM JSON 파싱 오류:", content);
         return {
             다중이용건축물: resultText,
-            판단근거: `AI 응답 형식 오류. 승강기 정보 기반으로 ${resultText} 판단. (대장 부재)`
+            판단근거: `AI 응답 형식 오류. 서버의 ${resultText} 판단을 따름.`
         };
     }
 }
-
 
 // 9. 웹 클라이언트용 통합 분석 API (최종 Hybrid Flow)
 async function apiSummaryHandler(req, res) {
@@ -610,16 +629,14 @@ async function apiSummaryHandler(req, res) {
         
         console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도.`);
         
-        // 2-1. 승강기 정보 파편화 조회 함수로 대체 (이제 모든 검색 결과를 수집함)
+        // 2-1. 승강기 정보 파편화 조회 함수로 대체
         const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
         
         // 2-2. 🚨 Elevator Data Found -> Custom Judgment
         if (elevatorResult.count > 0) {
-            
-            // 수집된 모든 데이터 중 원본 건물명과 가장 유사한 항목 1개 선정
             const bestElevatorItem = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
             
-            // 만약 유사도가 너무 낮아 적합한 건물을 찾을 수 없다면 최종 실패로 처리
+            // 승강기 정보는 찾았으나, 매칭되는 건물명 없음 -> 최종 실패로 처리
             if (!bestElevatorItem) {
                  return res.status(404).json({
                     error: "승강기 정보 조회 성공 후, 건물명 일치 여부를 확인할 수 없습니다.",
@@ -667,48 +684,7 @@ async function apiSummaryHandler(req, res) {
 }
 
 
-// 10. 기존 summary 유지 (레거시 API)
-app.get("/summary", async (req, res) => {
-    try {
-        const addr = req.query.addr;
-        if (!addr) return res.status(400).json({ error: "주소 필요" });
-        const addressInfo = await searchAddress(addr);
-        
-        if (!addressInfo) { return res.status(400).json({ error: "주소 검색 결과 없음" }); } 
-        
-        const items = await fetchBuildingRegister(addressInfo);
-        const summary = buildSummary(items);
-        const multiUse = isMultiUseBuilding(summary);
-
-        const 최고지상층수 = summary.최고지상층수 || 0; 
-
-        const GA_TYPES = [
-            "문화 및 집회시설",
-            "종교시설",
-            "판매시설",
-            "운수시설",
-            "의료시설",
-            "숙박시설",
-        ];
-        const 가항목 = {};
-        const multiUseAreaThreshold = 5000;
-        GA_TYPES.forEach((type) => {
-            const 대상 = summary.다중이용건물.filter(
-                (it) => it.용도 === type && it.연면적 >= multiUseAreaThreshold
-            );
-            가항목[type] = 대상.length > 0 ? "해당" : "해당없음";
-        });
-
-        res.json({
-            주소: `${addressInfo.roadAddr} (${addressInfo.jibun})`,
-            다중이용건축물: multiUse.다중이용건축물 ? "예" : "아니오",
-            판단근거: { 가: 가항목, 나: { 최고지상층수 } },
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "조회 실패", detail: String(err) });
-    }
-});
+// 10. 기존 summary 유지 (레거시 API, 삭제됨)
 
 // GET/POST 모두 단일 핸들러로 연결 (새로운 웹 API)
 app.get("/api/summary", apiSummaryHandler);
