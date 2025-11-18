@@ -1,5 +1,4 @@
-// 1. 기본 세팅_test v.4 251118 21시07분
-// 1. 기본 세팅
+// 1. 기본 세팅_test v.5 251118 21시18분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -71,7 +70,7 @@ async function searchAddress(input) {
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
-    // 🚨 승강기 API에 필요한 정보
+    // 🚨 승강기 API에 필요한 정보 추가
     siNm: juso.siNm, 
     sggNm: juso.sggNm,
     buldNm: juso.bdNm,
@@ -102,12 +101,12 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   const res = await fetch(url.toString());
-  const text = await res.text(); // 텍스트로 먼저 받음
+  const text = await res.text();
   if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
   try {
-    data = JSON.parse(text); // 안전하게 JSON 파싱 시도
+    data = JSON.parse(text);
   } catch (e) {
     throw new Error("건축물대장 JSON 파싱 실패 → " + text);
   }
@@ -128,6 +127,9 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
         return { count: 0, items: [] };
     }
     
+    // 승강기 API는 시/도 이름, 시/군/구 이름, 건물명으로 조회
+    const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
+
     const params = {
         serviceKey: ELEVATOR_KEY, 
         pageNo: "1",
@@ -154,7 +156,7 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
             return { count: 0, items: [] };
         }
         
-        // 2. 텍스트를 JSON으로 안전하게 파싱 시도 (Unexpected token 'u' 오류 방지)
+        // 2. 텍스트를 JSON으로 안전하게 파싱 시도
         let data;
         try {
             data = JSON.parse(text);
@@ -187,12 +189,14 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     }
 }
 
-// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수
+
+// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수 (Fallback 전용)
 function getElevatorSummary(elevatorItems) {
+    // Note: 이 함수는 MOLIT 데이터가 없을 때만 호출됨
     if (!elevatorItems || elevatorItems.length === 0) {
         return { isMultiUse: false, maxFloor: 0, reason: "승강기 정보 없음" };
     }
-
+    
     // 승강기 정보 기반 판단은 16층 이상 (나목) 기준으로만 진행
     const maxFloor = Math.max(...elevatorItems.map(item => Number(item.groundFloorCnt) || 0));
     const isMultiUse = maxFloor >= 16;
@@ -252,10 +256,11 @@ async function fetchBuildingRegister(addressInfo) {
 }
 
 
-// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링) - [기존과 동일]
+// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링)
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
+    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
         const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
@@ -263,11 +268,13 @@ function buildSummary(items) {
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
+        // --- 1. 불완전 데이터 필터링 ---
         if (totArea === 0 || purpCode === '') {
             if (grndFlrCnt >= 16) return true; 
             return false;
         }
 
+        // --- 2. 엉뚱한 용도 필터링 ---
         const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
         const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
 
@@ -275,6 +282,7 @@ function buildSummary(items) {
             return false;
         }
         
+        // --- 3. 노후도 필터링 ---
         if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
             return false; 
         }
@@ -282,6 +290,7 @@ function buildSummary(items) {
         return true;
     });
     
+    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
     const 다중이용건물 = filteredItems.filter( 
         (it) =>
             [
@@ -440,9 +449,10 @@ async function llmElevatorJudgment(summary) {
 }
 
 
-// 9. 웹 클라이언트용 통합 분석 API (카카오톡 라우터 대체) 🚨 로직 변경됨
+// 9. 웹 클라이언트용 통합 분석 API (카카오톡 라우터 대체)
 async function apiSummaryHandler(req, res) {
     try {
+        // GET 쿼리 또는 POST 바디에서 주소 추출
         const addr = req.query.addr || req.body.addr;
         const cleanAddr = (addr || '').trim();
         
@@ -450,7 +460,9 @@ async function apiSummaryHandler(req, res) {
             return res.status(400).json({ error: "주소가 필요합니다." });
         }
 
+        // 🚨 유효성 필터링 강화
         if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
+            console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
             return res.status(400).json({ 
                 error: "주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." 
             });
@@ -459,12 +471,16 @@ async function apiSummaryHandler(req, res) {
         // 1. 필수 정보 조회 (Juso)
         const addressInfo = await searchAddress(cleanAddr);
         
+        // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
         if (!addressInfo) {
             return res.status(404).json({
                 error: `"${cleanAddr}"에 대한 주소 검색 결과를 찾을 수 없습니다.`
             });
         }
-
+        
+        // 🚨 0번지 필터링 로직 (조회 자체가 무의미한 경우 차단)
+        const isZeroJibeon = addressInfo.bun === '0000' && addressInfo.ji === '0000';
+        
         // 2. 건축물대장 조회 (주변 지번까지 포함하여 조회)
         const items = await fetchBuildingRegister(addressInfo);
         
@@ -500,8 +516,7 @@ async function apiSummaryHandler(req, res) {
         
         // 🚨 CASE 2: MOLIT Failure (No data found) -> FALLBACK to Elevator API
         
-        const isZeroJibeon = addressInfo.bun === '0000' && addressInfo.ji === '0000';
-        console.warn(`[FALLBACK-PATH] 건축물대장 정보 없음. 승강기 API로 최종 검증 시도. (0번지 여부: ${isZeroJibeon})`);
+        console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도. (0번지 여부: ${isZeroJibeon})`);
         
         // 2-1. 승강기 정보 조회
         const elevatorResult = await fetchElevatorInfo(addressInfo.siNm, addressInfo.sggNm, addressInfo.buldNm);
@@ -533,13 +548,14 @@ async function apiSummaryHandler(req, res) {
             });
         }
         
-        // 2-3. 🚨 Elevator Data NOT Found -> Final Failure
+        // 2-3. 🚨 Final Failure
         return res.status(404).json({
             error: "건축물대장 및 승강기 등록 정보를 찾을 수 없습니다.",
             detail: isZeroJibeon 
-                ? "해당 주소는 지번이 '0번지'이며, 승강기 정보도 없어 건물 존재 여부를 확인할 수 없습니다."
+                ? "해당 주소는 지번이 '0번지'이며, 승강기 등록 정보도 없어 건물 존재 여부를 확인할 수 없습니다."
                 : "주변 지번까지 확장하여 조회했으나, 유효한 건축물대장 정보와 승강기 등록 정보가 모두 없습니다."
         });
+
 
     } catch (err) {
         console.error("FATAL ERROR IN API SUMMARY HANDLER:", err);
@@ -605,4 +621,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
