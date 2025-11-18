@@ -1,4 +1,4 @@
-// 1. 기본 세팅_test v.5 251118 21시18분
+// 1. 기본 세팅_test v.6 251118 21시31분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -18,7 +18,7 @@ const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-// 🚨 Elevator Key 추가 (필요)
+// 🚨 Elevator Key 필요
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
@@ -70,7 +70,6 @@ async function searchAddress(input) {
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
-    // 🚨 승강기 API에 필요한 정보 추가
     siNm: juso.siNm, 
     sggNm: juso.sggNm,
     buldNm: juso.bdNm,
@@ -121,14 +120,14 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 5.2 🆕 승강기 정보 조회 함수 (안정성 강화)
+// 5.2 🆕 승강기 정보 조회 함수 (안정성 강화 및 URL 수정)
 async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     if (!buldNm || !siNm) {
         return { count: 0, items: [] };
     }
     
-    // 승강기 API는 시/도 이름, 시/군/구 이름, 건물명으로 조회
-    const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
+    // 🚨 URL 수정: B553664 서비스 ID 사용
+    const ELEVATOR_BASE_URL = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`;
 
     const params = {
         serviceKey: ELEVATOR_KEY, 
@@ -140,23 +139,19 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
         _type: "json",
     };
 
-    const url = new URL(
-        `https://apis.data.go.kr/1613000/ElevatorListService/getElevatorListM`
-    );
+    const url = new URL(ELEVATOR_BASE_URL);
 
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
     try {
         const res = await fetch(url.toString());
-        const text = await res.text(); // 🚨 JSON 파싱 전, 일단 텍스트로 받기
+        const text = await res.text(); 
 
-        // 1. HTTP 상태 코드 검사 (401, 404, 500 등)
         if (!res.ok) {
             console.error(`[ELEVATOR-ERROR] HTTP ${res.status} 오류: ${text.substring(0, 50)}...`);
             return { count: 0, items: [] };
         }
         
-        // 2. 텍스트를 JSON으로 안전하게 파싱 시도
         let data;
         try {
             data = JSON.parse(text);
@@ -165,13 +160,11 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
             return { count: 0, items: [] };
         }
 
-        // 3. API 내부 오류 코드 검사
         if (data.response?.header?.resultCode !== "00") {
              console.error(`[ELEVATOR-ERROR] API 논리 오류: ${data.response?.header?.resultMsg}`);
              return { count: 0, items: [] };
         }
 
-        // 4. 데이터 추출
         const count = Number(data.response?.body?.totalCount) || 0;
         const rawItems = data.response?.body?.items?.item;
         
@@ -189,15 +182,12 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     }
 }
 
-
-// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수 (Fallback 전용)
+// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수
 function getElevatorSummary(elevatorItems) {
-    // Note: 이 함수는 MOLIT 데이터가 없을 때만 호출됨
     if (!elevatorItems || elevatorItems.length === 0) {
         return { isMultiUse: false, maxFloor: 0, reason: "승강기 정보 없음" };
     }
-    
-    // 승강기 정보 기반 판단은 16층 이상 (나목) 기준으로만 진행
+
     const maxFloor = Math.max(...elevatorItems.map(item => Number(item.groundFloorCnt) || 0));
     const isMultiUse = maxFloor >= 16;
     
@@ -223,7 +213,6 @@ async function fetchBuildingRegister(addressInfo) {
   const baseJiNumber = Number(ji); 
   const currentBun = bun;
 
-  // 조회할 부번 목록 생성 (기본: -2, -1, 0, 1, 2)
   const jiOffsets = [-2, -1, 0, 1, 2]; 
 
   let allItems = [];
@@ -243,7 +232,6 @@ async function fetchBuildingRegister(addressInfo) {
       if (items.length > 0) {
         console.log(`[MOLIT-SUCCESS] ${currentBun}-${targetJi}에서 유효한 데이터 발견. 조회 중단.`);
         allItems.push(...items); 
-        // 🚨 데이터가 발견되면 병합하고 즉시 루프 종료
         return allItems;
       }
     } catch (error) {
@@ -251,16 +239,14 @@ async function fetchBuildingRegister(addressInfo) {
     }
   }
 
-  // 모든 주변 지번 조회 실패 시
   return allItems;
 }
 
 
-// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링)
+// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링) - [기존과 동일]
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
-    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
         const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
@@ -268,13 +254,11 @@ function buildSummary(items) {
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
-        // --- 1. 불완전 데이터 필터링 ---
         if (totArea === 0 || purpCode === '') {
             if (grndFlrCnt >= 16) return true; 
             return false;
         }
 
-        // --- 2. 엉뚱한 용도 필터링 ---
         const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
         const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
 
@@ -282,7 +266,6 @@ function buildSummary(items) {
             return false;
         }
         
-        // --- 3. 노후도 필터링 ---
         if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
             return false; 
         }
@@ -290,7 +273,6 @@ function buildSummary(items) {
         return true;
     });
     
-    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
     const 다중이용건물 = filteredItems.filter( 
         (it) =>
             [
@@ -471,15 +453,11 @@ async function apiSummaryHandler(req, res) {
         // 1. 필수 정보 조회 (Juso)
         const addressInfo = await searchAddress(cleanAddr);
         
-        // 🚨 주소 검색 결과가 null인 경우 (없는 주소인 경우) 처리
         if (!addressInfo) {
             return res.status(404).json({
                 error: `"${cleanAddr}"에 대한 주소 검색 결과를 찾을 수 없습니다.`
             });
         }
-        
-        // 🚨 0번지 필터링 로직 (조회 자체가 무의미한 경우 차단)
-        const isZeroJibeon = addressInfo.bun === '0000' && addressInfo.ji === '0000';
         
         // 2. 건축물대장 조회 (주변 지번까지 포함하여 조회)
         const items = await fetchBuildingRegister(addressInfo);
@@ -516,6 +494,7 @@ async function apiSummaryHandler(req, res) {
         
         // 🚨 CASE 2: MOLIT Failure (No data found) -> FALLBACK to Elevator API
         
+        const isZeroJibeon = addressInfo.bun === '0000' && addressInfo.ji === '0000';
         console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도. (0번지 여부: ${isZeroJibeon})`);
         
         // 2-1. 승강기 정보 조회
