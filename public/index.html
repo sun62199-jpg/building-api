@@ -4,11 +4,14 @@
   <meta charset="UTF-8" />
   <title>건축물 다중이용 여부 조회</title>
   <style>
-    body { font-family: Arial; padding: 40px; background: #f5f5f5; }
-    h1 { margin-bottom: 20px; }
-    input { padding: 10px; width: 300px; margin-right: 10px; }
-    button { padding: 10px 20px; cursor: pointer; }
-    .result { margin-top: 20px; padding: 20px; background: #fff; border-radius: 8px; white-space: pre-wrap; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+    body { font-family: 'Malgun Gothic', 'Arial'; padding: 40px; background: #f5f5f5; }
+    h1 { margin-bottom: 20px; color: #333; }
+    input { padding: 12px; width: 350px; margin-right: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 16px; }
+    button { padding: 12px 25px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px; font-size: 16px; transition: background 0.3s; }
+    button:hover { background: #45a049; }
+    .result { margin-top: 30px; padding: 25px; background: #fff; border-radius: 8px; white-space: pre-wrap; box-shadow: 0 4px 12px rgba(0,0,0,0.15); line-height: 1.6; }
+    .status-ok { color: #1e88e5; font-weight: bold; }
+    .status-fail { color: #d32f2f; font-weight: bold; }
   </style>
 </head>
 <body>
@@ -17,49 +20,64 @@
   <input id="addr" placeholder="주소를 입력하세요 (예: 경기도 양주시 옥정서로 254)" />
   <button onclick="search()">조회</button>
 
-  <div class="result" id="result"></div>
+  <div class="result" id="result">여기에 조회 결과가 표시됩니다.</div>
 
   <script>
     async function search() {
       const addr = document.getElementById("addr").value.trim();
       const resultBox = document.getElementById("result");
       if (!addr) {
-        resultBox.innerHTML = "주소를 입력해주세요.";
+        resultBox.innerHTML = "<span class='status-fail'>주소를 입력해주세요.</span>";
         return;
       }
 
-      resultBox.innerHTML = "조회 중...";
+      resultBox.innerHTML = "<span class='status-ok'>데이터 조회 중...</span>";
 
       try {
-        const res = await fetch(`/summary?addr=${encodeURIComponent(addr)}`);
+        // 🚨 새로운 API 엔드포인트 호출
+        const res = await fetch(`/api/summary?addr=${encodeURIComponent(addr)}`);
         const data = await res.json();
-
-        if (data.error) {
-          resultBox.innerHTML = `❌ 오류: ${data.error}\n${data.detail || ""}`;
+        
+        // --- 오류 및 조회 불가 처리 ---
+        if (data.error || res.status !== 200) {
+          const errorMessage = data.error || `HTTP ${res.status} 오류 발생.`;
+          resultBox.innerHTML = `<span class='status-fail'>❌ 조회 불가: ${errorMessage}</span>`;
           return;
         }
 
-        // "가" 항목 출력
-        const gaItems = Object.entries(data.판단근거?.가 || {})
-          .map(([key, val]) => `${key} ==> ${val}`)
+        // --- 데이터 추출 ---
+        const analysis = data.analysis;
+        const summary = data.summaryDetails;
+        
+        // --- 상세 분석 항목 구성 ---
+        const gaItems = summary.다중이용건물
+          .map(item => `   - ${item.용도} | 층수: ${item.지상층}F | 연면적: ${item.연면적.toFixed(2)}㎡`)
           .join("\n");
+        
+        const maxFloor = summary.최고지상층수;
+        const finalDecision = analysis.llmFinalDecision === '예' ? '✅ 예' : '❌ 아니오';
 
-        // "나" 항목 출력
-        const naItem = `가장 높은 지상층수 ==> ${data.판단근거?.나?.최고지상층수 || "-"}`;
-
+        // --- 최종 출력 ---
         resultBox.innerHTML = `
-주소: ${data.주소}
-다중이용건축물: ${data.다중이용건축물 ? "✅ 예" : "❌ 아니오"}
+<span class='status-ok'>✅ 조회 성공: ${data.addressInfo.roadAddr}</span>
+주소 (지번): ${data.addressInfo.jibun}
 
-판단 근거:
-가)
+--- 최종 판단 ---
+다중이용건축물 여부: <strong>${finalDecision}</strong>
+<div style="margin-top: 10px;">
+분석 근거 요약: ${analysis.llmReason}
+</div>
+
+--- 상세 데이터 ---
+최고 지상층수: ${maxFloor}F
+총 건물 수 (필터링 후): ${summary.총건물수}개
+
+[가목 해당 용도 목록]
 ${gaItems || "해당없음"}
-
-나)
-${naItem}
         `;
+        
       } catch (err) {
-        resultBox.innerHTML = `❌ 조회 실패: ${err}`;
+        resultBox.innerHTML = `<span class='status-fail'>❌ 통신 오류: 서버 연결 실패 (${err.message})</span>`;
       }
     }
   </script>
