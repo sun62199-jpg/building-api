@@ -1,4 +1,5 @@
-// 1. 기본 세팅_test v.1 251118 20시46분
+// 1. 기본 세팅_test v.2 251118 20시53분
+// 1. 기본 세팅
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -15,7 +16,7 @@ const PORT = process.env.PORT || 3000;
 
 // 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
-const MOLIT_KEY = process.env.MOLIT_KEY; 
+const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
 // 🚨 Elevator Key 추가 (필요)
@@ -177,7 +178,7 @@ async function fetchBuildingRegister(addressInfo) {
   const baseJiNumber = Number(ji); 
   const currentBun = bun;
 
-  // 조회할 부번 목록 생성 (기본: -2, -1, 0, +1, +2)
+  // 조회할 부번 목록 생성 (기본: -2, -1, 0, 1, 2)
   const jiOffsets = [-2, -1, 0, 1, 2]; 
 
   let allItems = [];
@@ -280,7 +281,7 @@ function buildSummary(items) {
         가목_연면적_합계: 가목_연면적_합계, 
         가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
         다중이용건물: 다중이용건물.map((it) => ({
-             용도: it.mainPurpsCdNm,
+            용도: it.mainPurpsCdNm,
             지상층: Number(it.grndFlrCnt),
             연면적: Number(it.totArea)
         })),
@@ -411,9 +412,23 @@ async function apiSummaryHandler(req, res) {
         
         // 🚨 0번지 필터링 로직 (조회 자체가 무의미한 경우 차단)
         if (addressInfo.bun === '0000' && addressInfo.ji === '0000') {
-            console.warn(`[ZERO_BUN_WARN] 지번이 0번지(예: 덕계동 0)로 감지되어 오류 메시지 반환`);
+            console.warn(`[ZERO_BUN_WARN] 지번이 0번지(예: 덕계동 0)로 감지됨. 최종 검증 시작.`);
+            
+            // 🚨 0번지 주소일 경우 승강기 API를 최종 검증 수단으로 사용
+            const elevatorResult = await fetchElevatorInfo(addressInfo.siNm, addressInfo.sggNm, addressInfo.buldNm);
+            
+            if (elevatorResult.count > 0) {
+                 // 승강기 정보가 발견된 경우 (건물 존재 확인됨)
+                 return res.status(404).json({
+                     error: "건축물대장 조회가 불가능합니다.",
+                     detail: `하지만 승강기 관리 시스템에서 **${addressInfo.buldNm}**의 등록 정보 ${elevatorResult.count}건을 확인했습니다. (지번 불일치 문제)`,
+                     elevatorStatus: { count: elevatorResult.count, status: "데이터 존재" }
+                 });
+            }
+
+            // 승강기 API로도 건물을 찾지 못한 경우에만 404 반환
             return res.status(404).json({
-                error: "해당 주소는 지번이 '0번지'입니다. 건축물대장 조회가 불가능합니다."
+                error: "해당 주소는 지번이 '0번지'이며, 승강기 등록 정보도 없어 건축물대장 조회가 불가능합니다."
             });
         }
         
