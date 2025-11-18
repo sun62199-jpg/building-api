@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 
 // 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
-const MOLIT_KEY = process.env.MOLIT_KEY; 
+const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
@@ -73,7 +73,6 @@ async function searchAddress(input) {
 
 // 5. 건축물대장 조회 (지번 기반 getBrTitleInfo 만 사용)
 async function fetchBuildingRegister(addressInfo) {
-  // 관리번호(bdMgtSn)는 사용하지 않음
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   
   const endpoint = "getBrTitleInfo"; // 🚨 가장 안정적인 지번 조회 엔드포인트만 사용
@@ -125,27 +124,32 @@ async function fetchBuildingRegister(addressInfo) {
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
-    // 🚨 최종 필터링 로직 (불완전 데이터 및 엉뚱한 용도 제거) 🚨
+    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
-        const purp = it.mainPurpsCdNm?.trim() || ''; // 주용도 공백 제거
+        const purpName = it.mainPurpsCdNm?.trim() || ''; // 주용도 이름 (공백 제거)
+        const purpCode = it.mainPurpsCd?.trim() || ''; // 🚨 주용도 코드 (필수 확인)
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
-        // 1. 불완전 데이터 필터링: 연면적이 0이거나 주용도가 빈 값인 경우 (rnum: 1번 건물 처리)
-        if (totArea === 0 || purp === '') {
-            // 단, 지상층수가 16층 이상이면 공동주택이므로 예외 처리 (주용도 누락된 신축 아파트 동 대장일 경우)
+        // --- 1. 불완전 데이터 필터링 ---
+        // 연면적이 0이거나 주용도 코드가 빈 값인 경우 제거
+        if (totArea === 0 || purpCode === '') {
+            // 단, 지상층수가 16층 이상이면 공동주택일 수 있으므로 예외 처리
             if (grndFlrCnt >= 16) return true; 
-            return false; // 연면적 0 또는 주용도 빈 값은 불량 데이터로 간주하고 제거
+            return false; // 불완전 데이터 제거
         }
 
-        // 2. 엉뚱한 용도 필터링: 공장, 창고, 위험물 (rnum: 2번 건물 처리)
-        // includes()를 사용하여 "공장(제조업)", "공장" 모두 대응
-        if (purp.includes('공장') || purp.includes('창고') || purp.includes('위험물')) {
-            return false; 
+        // --- 2. 엉뚱한 용도 필터링 (코드/이름 모두 검사) ---
+        // 공장 코드: 17000, 창고 코드: 21000 (MOLIT 명세 기준)
+        const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
+        const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
+
+        if (isFactoryOrWarehouseCode || isFactoryOrWarehouseName) {
+            return false; // 엉뚱한 용도의 건물 제거
         }
         
-        // 3. 노후도 필터링 (기존 로직 유지)
+        // --- 3. 노후도 필터링 (새로운 건물에 맞지 않는 오래된 저층 건물을 제거) ---
         if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
             return false; 
         }
@@ -467,4 +471,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
   console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
