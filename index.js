@@ -1,4 +1,4 @@
-// 1. 기본 세팅 v2.4 221118
+// 1. 기본 세팅 v2.5 221118
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -362,6 +362,7 @@ function buildSummary(items) {
     
     // 🚨 필터링 간소화: 불완전 데이터만 제거 🚨
     const filteredItems = items.filter(it => {
+        const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
@@ -491,7 +492,7 @@ ${JSON.stringify(GPT_근거, null, 2)}
     } else {
         // JSON 구조를 찾지 못한 경우
         console.error("LLM (MOLIT) JSON 추출 실패: ", content.substring(0, 200));
-        return { // 안전 폴백
+        return {
             다중이용건축물: ruleResult.GPT_근거.결과,
             판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
         };
