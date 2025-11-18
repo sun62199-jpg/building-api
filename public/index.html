@@ -3,217 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>건축물 안전관리 의무교육 자동 안내 AI 플랫폼</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'primary': '#1E3A8A', // Dark Blue
-                        'secondary': '#60A5FA', // Light Blue
-                        'highlight': '#FBBF24', // Amber/Yellow
-                    },
-                }
-            }
-        }
-    </script>
+    <title>다중이용건축물 판단기_테스트 v2.2 251118_20시05분</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #F3F4F6;
-        }
-        /* Custom scrollbar for aesthetics */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #E5E7EB; }
-        ::-webkit-scrollbar-thumb { background: #9CA3AF; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #6B7280; }
+        body { background-color: #f8f9fa; }
+        .container { max-width: 800px; margin-top: 50px; }
+        .result-card { border-left: 5px solid; padding-left: 15px; margin-top: 20px; }
+        .result-card.success { border-color: #28a745; }
+        .result-card.fail { border-color: #dc3545; }
+        .result-card.fallback { border-color: #ffc107; }
+        .json-viewer { background-color: #e9ecef; padding: 10px; border-radius: 5px; max-height: 300px; overflow-y: scroll; white-space: pre-wrap; word-wrap: break-word; font-family: monospace; }
+        .hidden { display: none; }
     </style>
 </head>
-<body class="p-4 sm:p-8 min-h-screen flex items-start justify-center">
-
-    <div class="w-full max-w-3xl bg-white shadow-2xl rounded-xl p-6 sm:p-10 mt-10 border border-gray-100">
-
-        <header class="text-center mb-8">
-            <h1 class="text-3xl sm:text-4xl font-extrabold text-primary mb-2">
-                스마트 교육 안내 시스템
-            </h1>
-            <p class="text-gray-600 text-lg">
-                건물 주소로 이수해야 할 법정 의무교육을 단 한 번에 확인하세요!
-            </p>
-        </header>
-
-        <section class="mb-8 p-6 bg-gray-50 rounded-lg border border-gray-200">
-            <label for="addressInput" class="block text-lg font-semibold text-gray-700 mb-3">
-                1. 건물 주소 (도로명 또는 지번) 입력
-            </label>
-            <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
-                <input type="text" id="addressInput" placeholder="예: 서울특별시 강남구 테헤란로 123"
-                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm">
-                <button id="checkButton"
-                        class="px-6 py-3 bg-primary text-white font-bold rounded-lg hover:bg-secondary transition duration-300 shadow-md transform hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50">
-                    교육 내용 확인하기
-                </button>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">다중이용건축물 판단기</h1>
+        <div class="input-group mb-3">
+            <input type="text" id="addressInput" class="form-control" placeholder="주소를 입력하세요 (예: 회천중앙로 282 또는 양주회천15단지)">
+            <button class="btn btn-primary" id="searchBtn">조회</button>
+        </div>
+        <div id="loadingIndicator" class="text-center hidden">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
             </div>
-        </section>
-
-        <section class="p-6 border-4 border-dashed border-highlight/50 bg-highlight/10 rounded-xl">
-            <h2 class="text-2xl font-bold text-gray-800 mb-4 flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-highlight mr-2" viewBox="0 0 24 24" fill="currentColor">
-                    <path fill-rule="evenodd" d="M2.5 6.5A4.5 4.5 0 0 1 7 2h10a4.5 4.5 0 0 1 4.5 4.5v11A4.5 4.5 0 0 1 17 22H7a4.5 4.5 0 0 1-4.5-4.5v-11ZM4 6.5a2.5 2.5 0 0 1 2.5-2.5h11A2.5 2.5 0 0 1 19 6.5v11a2.5 2.5 0 0 1-2.5 2.5H6.5A2.5 2.5 0 0 1 4 17.5v-11Z" clip-rule="evenodd"/>
-                    <path d="M10.25 15a.75.75 0 0 0-.75.75v.5c0 .414.336.75.75.75h3.5a.75.75 0 0 0 .75-.75v-.5a.75.75 0 0 0-.75-.75h-3.5Z"/>
-                    <path fill-rule="evenodd" d="M12 12.75a.75.75 0 0 1-.75-.75V7a.75.75 0 0 1 1.5 0v5a.75.75 0 0 1-.75.75Z" clip-rule="evenodd"/>
-                </svg>
-                조회 결과
-            </h2>
-            <div id="loadingIndicator" class="hidden text-center p-4">
-                <div class="animate-spin inline-block w-6 h-6 border-4 border-t-4 border-secondary border-t-transparent rounded-full mb-2"></div>
-                <p class="text-gray-500">건축물 데이터베이스 확인 중...</p>
+            <p class="mt-2">정보 조회 중...</p>
+        </div>
+        <div id="results" class="hidden">
             </div>
-
-            <div id="resultOutput" class="space-y-4">
-                <p class="text-gray-500 italic">주소를 입력하고 버튼을 눌러주세요.</p>
-            </div>
-
-            <div id="errorMessage" class="hidden mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg">
-                </div>
-        </section>
-
-        <section class="mt-8 p-4 bg-blue-50 rounded-lg border border-blue-200 text-sm">
-            <h3 class="font-semibold text-primary mb-2">💡 AI 플랫폼의 핵심 가치</h3>
-            <ul class="list-disc list-inside text-gray-600 space-y-1">
-                <li>**중복 이수 방지:** 일반 건축물과 다중이용 건축물 기준을 자동 판단하여 불필요한 교육 중복 이수를 막습니다.</li>
-                <li>**행정 혼선 해소:** 안전관리자 선임 단계에서부터 정확한 법정 의무교육 정보를 제공하여 민원을 최소화합니다.</li>
-                <li>**시간 및 비용 절감:** 교육 과정 확인에 소요되는 시간을 획기적으로 단축합니다.</li>
-            </ul>
-        </section>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // --- 교육 구분 상수 (서버 응답을 UI 텍스트로 변환) ---
-        const EDUCATION_MULTI = "비상구출운전 및 승강기관리 교육";
-        const EDUCATION_GENERAL = "승강기 관리 교육 (다중이용 건축물 교육 불필요)";
-        const EDUCATION_NONE = "교육 의무 없음 (관련 시설 미보유)";
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const addressInput = document.getElementById('addressInput');
-            const checkButton = document.getElementById('checkButton');
-            const resultOutput = document.getElementById('resultOutput');
+        document.getElementById('searchBtn').addEventListener('click', async () => {
+            const address = document.getElementById('addressInput').value;
+            const resultsDiv = document.getElementById('results');
             const loadingIndicator = document.getElementById('loadingIndicator');
-            const errorMessage = document.getElementById('errorMessage');
-             
-            // ✅ 수정: DOM 로드 후 버튼 상태를 확실하게 활성화
-            checkButton.disabled = false; 
+            resultsDiv.innerHTML = '';
+            resultsDiv.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
 
-            // ✅ 수정: 주소 입력창에서 Enter 키 입력 시 조회 버튼 클릭 이벤트 등록
-            addressInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    e.preventDefault(); // 기본 폼 전송 방지
-                    checkButton.click();
-                }
-            });
+            try {
+                const response = await fetch('/api/summary', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ addr: address }),
+                });
 
-            // --- UI/UX 로직 ---
-            checkButton.addEventListener('click', async () => {
-                const address = addressInput.value.trim();
+                const data = await response.json();
 
-                errorMessage.classList.add('hidden');
-                resultOutput.innerHTML = '';
+                if (response.ok) {
+                    let cardClass = '';
+                    let statusText = '';
+                    let rawDataSummary = '';
+                    let rawDataSource = '';
+                    let rawDataContent = '';
 
-                if (!address) {
-                    errorMessage.textContent = "🏢 건물 주소를 입력해 주세요.";
-                    errorMessage.classList.remove('hidden');
-                    return;
-                }
-
-                // 로딩 시작
-                checkButton.disabled = true; // 🚨 여기서 비활성화
-                loadingIndicator.classList.remove('hidden');
-                resultOutput.classList.add('hidden');
-
-                try {
-                    // 🚨 실제 서버 API 호출
-                    const response = await fetch(`/api/summary?addr=${encodeURIComponent(address)}`);
-                    const data = await response.json();
-                    
-                    // --- API 오류 및 조회 불가 처리 (HTTP 상태 코드 확인) ---
-                    if (!response.ok || data.error) {
-                        const errorMsg = data.error || `서버 통신 오류 (HTTP ${response.status})`;
-                        errorMessage.textContent = `❌ 조회 실패: ${errorMsg}`;
-                        errorMessage.classList.remove('hidden');
-                        return;
+                    if (data.status === 'ok') {
+                        cardClass = 'success';
+                        statusText = '성공 (건축물대장 기반)';
+                        rawDataSource = '건축물대장 (MOLIT) 상세';
+                        rawDataContent = data.summaryDetails.다중이용건물; // MOLIT의 다중이용건물 목록
+                        rawDataSummary = `
+                            <p><strong>총 건물 수:</strong> ${data.summaryDetails.총건물수}개</p>
+                            <p><strong>다중이용건물 수:</strong> ${data.summaryDetails.다중이용건물수}개</p>
+                            <p><strong>최고 지상층수:</strong> ${data.summaryDetails.최고지상층수}층</p>
+                            <p><strong>가목 연면적 합계:</strong> ${data.summaryDetails.가목_연면적_합계.toFixed(2)}㎡</p>
+                            <p><strong>가목 대표 용도:</strong> ${data.summaryDetails.가목_대표_용도 || '없음'}</p>
+                        `;
+                    } else if (data.status === 'ok_fallback') {
+                        cardClass = 'fallback';
+                        statusText = '성공 (승강기 정보 기반 - 건축물대장 미조회)';
+                        rawDataSource = '승강기 정보 상세';
+                        rawDataContent = {
+                            elevatorCount: data.summaryDetails.elevatorCount,
+                            elevatorMaxFloor: data.summaryDetails.elevatorMaxFloor,
+                            // 실제 승강기 API 원본 항목을 여기에 포함할 수도 있습니다.
+                            // 예: elevatorItems: data.elevatorItems // 서버에서 이 필드를 추가로 넘겨준다면
+                        };
+                        rawDataSummary = `
+                            <p><strong>조회된 승강기 수:</strong> ${data.summaryDetails.elevatorCount}개</p>
+                            <p><strong>최고 지상층수 (승강기 기준):</strong> ${data.summaryDetails.elevatorMaxFloor}층</p>
+                            <p class="text-warning">⚠️ 건축물대장 정보가 없어 승강기 정보로 대체되었습니다.</p>
+                        `;
                     }
 
-
-                    // --- 결과 데이터 추출 및 매핑 ---
-                    const isMultiUse = data.analysis.llmFinalDecision === '예';
-                    const maxFloor = data.summaryDetails.최고지상층수;
-                    const hasElevator = true; // (현재 코드에서는 승강기 유무 정보를 API에서 직접 가져오지 않으므로, 임시로 true 가정)
-                    
-                    let educationText;
-                    let educationNote = data.analysis.llmReason;
-
-                    if (isMultiUse) {
-                        educationText = EDUCATION_MULTI;
-                    } else if (maxFloor >= 16) {
-                        // 16층 이상 건물은 비록 다중이용 건축물 기준(가목)에는 해당 안 되어도 특수 관리 대상일 수 있음
-                        educationText = EDUCATION_MULTI; 
-                        educationNote = data.analysis.llmReason + " (다만, 16층 이상이므로 안전관리 기준을 따라야 할 수 있습니다.)";
-                    } else if (hasElevator) {
-                        educationText = EDUCATION_GENERAL;
-                        educationNote = data.analysis.llmReason + " (일반 건축물 안전관리 기준에 따른 필수 교육입니다.)";
-                    } else {
-                        educationText = EDUCATION_NONE;
-                        educationNote = data.analysis.llmReason;
-                    }
-                    
-                    const totalAreaSum = data.summaryDetails.가목_연면적_합계.toFixed(2);
-
-
-                    // 결과 카드 생성
-                    resultOutput.innerHTML = `
-                        <div class="p-5 border-l-4 ${isMultiUse ? 'border-red-500' : 'border-green-500'} bg-white shadow-lg rounded-lg transition-all duration-300 hover:shadow-xl">
-                            <h3 class="text-xl font-bold mb-3 text-gray-800 flex justify-between items-center">
-                                판별 결과: ${isMultiUse ? '다중이용 건축물' : '일반 건축물'}
-                                <span class="px-3 py-1 text-sm font-semibold rounded-full ${isMultiUse ? 'text-red-800 bg-red-200' : 'text-green-800 bg-green-200'}">
-                                    ${isMultiUse ? '특수 관리 대상' : '일반 관리 대상'}
-                                </span>
-                            </h3>
-
-                            <div class="space-y-2">
-                                <p class="text-lg font-semibold text-primary">✅ 이수해야 할 법정 의무교육:</p>
-                                <p class="text-2xl font-extrabold p-3 rounded-md border border-dashed ${isMultiUse ? 'border-red-300 text-red-600' : 'border-green-300 text-green-600'}">
-                                    ${educationText}
-                                </p>
-                                <p class="text-gray-600 mt-2 text-sm">
-                                    <span class="font-medium">분석 근거: ${educationNote}</span>
-                                </p>
-                            </div>
-
-                            ${!isMultiUse ? `
-                                <p class="mt-4 p-3 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-md text-sm font-medium">
-                                    <span class="font-bold">⚠️ 중요:</span> ${maxFloor < 16 ? '다중이용 건축물 교육(비상구출운전)은 불필요합니다.' : '다중이용 건축물 기준(가목)에는 해당하지 않으나, 16층 이상이므로 안전관리 기준을 확인해야 합니다.'}
-                                </p>
-                            ` : ''}
-                            
-                            <div class="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
-                                <p>최고 지상층수: ${maxFloor}F | 가목 용도 연면적 합계: ${totalAreaSum}㎡ | 총 건축물 수: ${data.summaryDetails.총건물수}개</p>
+                    resultsDiv.innerHTML = `
+                        <div class="card result-card ${cardClass} mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title">조회 결과: ${statusText}</h5>
+                                <p class="card-text"><strong>주소:</strong> ${data.addressInfo.roadAddr} (${data.addressInfo.jibun})</p>
+                                <p class="card-text"><strong>다중이용건축물 여부:</strong> <span class="fw-bold">${data.analysis.llmFinalDecision}</span></p>
+                                <p class="card-text"><strong>판단 근거:</strong> ${data.analysis.llmReason}</p>
+                                <hr>
+                                <h6>데이터 요약:</h6>
+                                ${rawDataSummary}
+                                <button class="btn btn-sm btn-info mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#rawDataCollapse" aria-expanded="false" aria-controls="rawDataCollapse">
+                                    ${rawDataSource} 보기
+                                </button>
+                                <div class="collapse mt-2" id="rawDataCollapse">
+                                    <div class="json-viewer">
+                                        <pre>${JSON.stringify(rawDataContent, null, 2)}</pre>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     `;
-
-                } catch (error) {
-                    console.error("조회 중 오류 발생:", error);
-                    errorMessage.textContent = "데이터 조회 중 예상치 못한 오류가 발생했습니다. 서버 연결 상태를 확인해 주세요.";
-                    errorMessage.classList.remove('hidden');
-                } finally {
-                    // 로딩 종료
-                    loadingIndicator.classList.add('hidden');
-                    checkButton.disabled = false; // 🚨 여기서 활성화 보장
-                    resultOutput.classList.remove('hidden');
+                } else {
+                    cardClass = 'fail';
+                    resultsDiv.innerHTML = `
+                        <div class="card result-card ${cardClass} mb-3">
+                            <div class="card-body">
+                                <h5 class="card-title text-danger">조회 실패</h5>
+                                <p class="card-text"><strong>오류:</strong> ${data.error || '알 수 없는 오류'}</p>
+                                <p class="card-text"><strong>상세:</strong> ${data.detail || '상세 정보 없음'}</p>
+                            </div>
+                        </div>
+                    `;
                 }
-            });
+            } catch (error) {
+                console.error('클라이언트 측 오류 발생:', error);
+                resultsDiv.innerHTML = `
+                    <div class="card result-card fail mb-3">
+                        <div class="card-body">
+                            <h5 class="card-title text-danger">조회 중 예상치 못한 오류 발생</h5>
+                            <p class="card-text">서버 연결 상태를 확인해 주세요. (네트워크 또는 서버 응답 문제)</p>
+                            <p class="card-text">개발자 콘솔을 확인하여 상세 오류를 볼 수 있습니다.</p>
+                        </div>
+                    </div>
+                `;
+            } finally {
+                loadingIndicator.classList.add('hidden');
+                resultsDiv.classList.remove('hidden');
+            }
         });
     </script>
 </body>
