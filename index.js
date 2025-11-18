@@ -1,4 +1,4 @@
-// 1. 기본 세팅
+// 1. 기본 세팅_test v.1 251118 20시46분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -15,12 +15,15 @@ const PORT = process.env.PORT || 3000;
 
 // 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
-const MOLIT_KEY = process.env.MOLIT_KEY;
+const MOLIT_KEY = process.env.MOLIT_KEY; 
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
+// 🚨 Elevator Key 추가 (필요)
+const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
+
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
   console.warn(
-    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY 필요"
+    "⚠️ 환경변수가 부족합니다. JUSO_KEY, MOLIT_KEY, OPENAI_KEY, ELEVATOR_KEY 필요"
   );
 }
 
@@ -30,7 +33,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. JUSO 주소 검색 (법적 코드 획득)
+// 4. JUSO 주소 검색 (법적 코드 및 승강기 조회용 이름 획득)
 async function searchAddress(input) {
   console.log(`[JUSO DEBUG] 검색을 시도한 주소: ${input}`);
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
@@ -67,6 +70,10 @@ async function searchAddress(input) {
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
+    // 🚨 승강기 API에 필요한 정보 추가
+    siNm: juso.siNm, 
+    sggNm: juso.sggNm,
+    buldNm: juso.bdNm,
     rawJuso: juso, 
   };
 }
@@ -105,40 +112,81 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   }
 
   const header = data.response?.header;
-  // totalCount가 0인 경우를 처리하기 위해 resultCode 00만 검사
   if (!header || header.resultCode !== "00") {
-    // 00이 아니면 (예: 03-데이터 없음, 99-오류 등) 무조건 빈 배열 반환
     return []; 
   }
 
-  // 단일 항목일 경우 배열이 아닌 객체로 오는 경우가 있어 배열로 통합
   const rawItems = data.response?.body?.items?.item;
   if (!rawItems) return [];
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 5. 🔄 메인 함수: 주변 지번까지 확장하여 조회 시도
+// 5.2 🆕 승강기 정보 조회 함수 (보조 데이터 획득)
+async function fetchElevatorInfo(siNm, sggNm, buldNm) {
+    if (!buldNm || !siNm) {
+        return { count: 0, items: [] };
+    }
+    
+    // 승강기 API는 시/도 이름, 시/군/구 이름, 건물명으로 조회
+    const params = {
+        serviceKey: ELEVATOR_KEY, 
+        pageNo: "1",
+        numOfRows: "100",
+        sido: siNm, 
+        sigungu: sggNm, 
+        buld_nm: buldNm,
+        _type: "json",
+    };
+
+    const url = new URL(
+        `https://apis.data.go.kr/1613000/ElevatorListService/getElevatorListM`
+    );
+
+    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+
+    try {
+        const res = await fetch(url.toString());
+        const data = await res.json();
+        
+        if (data.response?.header?.resultCode !== "00") {
+             return { count: 0, items: [] };
+        }
+
+        const count = Number(data.response?.body?.totalCount) || 0;
+        const rawItems = data.response?.body?.items?.item;
+        
+        if (count === 0 || !rawItems) {
+            return { count: 0, items: [] };
+        }
+
+        const items = Array.isArray(rawItems) ? rawItems : [rawItems];
+        console.log(`[ELEVATOR-SUCCESS] ${count}개의 승강기 정보 발견.`);
+        return { count, items };
+    } catch (error) {
+        // 네트워크 오류 등 발생 시 콘솔에 로그만 남기고 빈 데이터 반환
+        console.error(`[ELEVATOR-ERROR] API 호출 중 오류 발생: ${error.message}`);
+        return { count: 0, items: [] };
+    }
+}
+
+
+// 5. 🔄 메인 함수: 주변 지번까지 확장하여 조회 시도 (MOLIT Primary)
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   
-  // 1. 부번(ji)을 숫자로 변환
   const baseJiNumber = Number(ji); 
-  const currentBun = bun; // 본번은 고정
+  const currentBun = bun;
 
-  // 2. 조회할 부번 목록 생성 (기본: -2, -1, 0, +1, +2)
-  // ji가 4자리로 패딩되어 있으므로, 0002를 받으면 2로 변환됨.
+  // 조회할 부번 목록 생성 (기본: -2, -1, 0, +1, +2)
   const jiOffsets = [-2, -1, 0, 1, 2]; 
 
   let allItems = [];
   
-  // 3. 순차적으로 API 호출 및 데이터 획득
   for (const offset of jiOffsets) {
     const targetJiNumber = baseJiNumber + offset;
 
-    // 부번이 음수가 되거나 9999를 초과하지 않도록 방어 (부번은 4자리)
     if (targetJiNumber < 0 || targetJiNumber > 9999) continue; 
     
-    // 타겟 부번을 다시 4자리 문자열로 패딩
     const targetJi = String(targetJiNumber).padStart(4, '0');
 
     console.log(`[MOLIT-MULTI] 지번 조회 시도: ${currentBun}-${targetJi}`);
@@ -147,15 +195,12 @@ async function fetchBuildingRegister(addressInfo) {
       const items = await callMolitApiSingle(sigunguCd, bjdongCd, currentBun, targetJi);
       
       if (items.length > 0) {
-        // 데이터가 발견되면 병합하고, 나머지 조회를 중단합니다.
-        // 현재는 단일 조회 결과를 반환하는 것으로 단순화
         console.log(`[MOLIT-SUCCESS] ${currentBun}-${targetJi}에서 유효한 데이터 발견. 조회 중단.`);
         allItems.push(...items); 
-        // 🚨 인접 번지에서 데이터를 찾았으면 해당 결과만 반환하고 루프 종료
+        // 🚨 데이터가 발견되면 병합하고 즉시 루프 종료
         return allItems;
       }
     } catch (error) {
-      // API 오류 발생 시, 이 주소에 대한 조회 전체를 실패로 처리
       throw new Error(`주변 지번 조회 중 치명적 오류: ${error.message}`);
     }
   }
@@ -171,24 +216,24 @@ function buildSummary(items) {
     
     // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
-        const purpName = it.mainPurpsCdNm?.trim() || ''; // 주용도 이름 (공백 제거)
-        const purpCode = it.mainPurpsCd?.trim() || ''; // 🚨 주용도 코드 (필수 확인)
+        const purpName = it.mainPurpsCdNm?.trim() || ''; 
+        const purpCode = it.mainPurpsCd?.trim() || ''; 
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
         // --- 1. 불완전 데이터 필터링 ---
         if (totArea === 0 || purpCode === '') {
-            if (grndFlrCnt >= 16) return true; // 16층 이상은 예외 처리
-            return false; // 불완전 데이터 제거
+            if (grndFlrCnt >= 16) return true; 
+            return false;
         }
 
-        // --- 2. 엉뚱한 용도 필터링 (코드/이름 모두 검사) ---
+        // --- 2. 엉뚱한 용도 필터링 ---
         const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
         const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
 
         if (isFactoryOrWarehouseCode || isFactoryOrWarehouseName) {
-            return false; // 엉뚱한 용도의 건물 제거
+            return false;
         }
         
         // --- 3. 노후도 필터링 ---
@@ -235,7 +280,7 @@ function buildSummary(items) {
         가목_연면적_합계: 가목_연면적_합계, 
         가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, // 대표 용도 문자열
         다중이용건물: 다중이용건물.map((it) => ({
-            용도: it.mainPurpsCdNm,
+             용도: it.mainPurpsCdNm,
             지상층: Number(it.grndFlrCnt),
             연면적: Number(it.totArea)
         })),
@@ -473,5 +518,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
-
