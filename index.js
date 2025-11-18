@@ -1,4 +1,4 @@
-// 1. 기본 세팅_test v2.0 251118 21시54분
+// 1. 기본 세팅_테스트 V2.1 251118_22시00분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -159,7 +159,7 @@ function generateElevatorSearchNames(addressInfo) {
 }
 
 
-// 5.2.2 🆕 승강기 정보 파편화 조회 함수
+// 5.2.2 🆕 승강기 정보 파편화 조회 함수 (수정됨: 모든 결과 수집)
 async function searchElevatorWithFallbackNames(addressInfo) {
     const searchNames = generateElevatorSearchNames(addressInfo);
     
@@ -167,17 +167,24 @@ async function searchElevatorWithFallbackNames(addressInfo) {
 
     // 시도/시군구는 Juso 결과값 그대로 사용
     const { siNm, sggNm } = addressInfo;
+    const allItems = []; // 모든 검색 결과를 누적할 배열
+    let totalCount = 0;
+
 
     for (const name of searchNames) {
         // 5.2. fetchElevatorInfo를 호출 (엔드포인트는 B553664로 수정된 상태)
         const result = await fetchElevatorInfo(siNm, sggNm, name);
+        
         if (result.count > 0) {
-            console.log(`[ELEVATOR-SUCCESS-FALLBACK] '${name}'로 ${result.count}건 검색 성공!`);
-            return result; // 성공하면 즉시 반환
+            console.log(`[ELEVATOR-SUCCESS-COLLECT] '${name}'로 ${result.count}건 검색 성공. 전체 수집 중.`);
+            allItems.push(...result.items); // 결과를 배열에 추가
+            totalCount += result.count;
+            // 🚨 여기서 바로 반환하지 않고 다음 검색어로 넘어갑니다.
         }
     }
     
-    return { count: 0, items: [] }; // 모든 시도 실패 시
+    // 모든 검색어를 시도한 후, 전체 결과를 반환합니다.
+    return { count: totalCount, items: allItems };
 }
 
 
@@ -293,7 +300,8 @@ function getElevatorSummary(elevatorItems) {
     }
 
     // 승강기 정보 기반 판단은 16층 이상 (나목) 기준으로만 진행
-    const maxFloor = Math.max(...elevatorItems.map(item => Number(item.groundFloorCnt) || 0));
+    // 🚨 수정된 필드명: groundFloorCnt -> divGroundFloorCnt
+    const maxFloor = Math.max(...elevatorItems.map(item => Number(item.divGroundFloorCnt) || 0));
     const isMultiUse = maxFloor >= 16;
     
     let reasonText = "";
@@ -602,18 +610,20 @@ async function apiSummaryHandler(req, res) {
         
         console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도.`);
         
-        // 2-1. 승강기 정보 파편화 조회 함수로 대체
+        // 2-1. 승강기 정보 파편화 조회 함수로 대체 (이제 모든 검색 결과를 수집함)
         const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
         
         // 2-2. 🚨 Elevator Data Found -> Custom Judgment
         if (elevatorResult.count > 0) {
+            
+            // 수집된 모든 데이터 중 원본 건물명과 가장 유사한 항목 1개 선정
             const bestElevatorItem = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
             
             // 만약 유사도가 너무 낮아 적합한 건물을 찾을 수 없다면 최종 실패로 처리
             if (!bestElevatorItem) {
                  return res.status(404).json({
                     error: "승강기 정보 조회 성공 후, 건물명 일치 여부를 확인할 수 없습니다.",
-                    detail: `총 ${elevatorResult.count}건의 승강기 정보가 있으나, '${addressInfo.buldNm}'와 일치하는 건물을 찾을 수 없습니다.`
+                    detail: `총 ${elevatorResult.count}건의 승강기 정보가 있으나, '${addressInfo.buldNm}'와 일치하는 건물을 찾을 수 없습니다. (데이터 불일치 가능성)`
                 });
             }
 
