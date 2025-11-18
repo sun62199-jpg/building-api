@@ -1,4 +1,4 @@
-// 1. 기본 세팅_test v.6 251118 21시31분
+// 1. 기본 세팅_test v5.3 251118 21시37분
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -18,7 +18,7 @@ const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
-// 🚨 Elevator Key 필요
+// 🚨 Elevator Key 추가 (필요)
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
@@ -70,6 +70,7 @@ async function searchAddress(input) {
     ji: String(juso.lnbrSlno || "").padStart(4, "0"),
     jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
     roadAddr: juso.roadAddr,
+    // 🚨 승강기 API에 필요한 정보 추가
     siNm: juso.siNm, 
     sggNm: juso.sggNm,
     buldNm: juso.bdNm,
@@ -120,7 +121,44 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 5.2 🆕 승강기 정보 조회 함수 (안정성 강화 및 URL 수정)
+// 5.2.1 🆕 승강기 정보 검색어 생성 함수 (최종 보강)
+function generateElevatorSearchNames(addressInfo) {
+    const rawBuldNm = addressInfo.buldNm;
+    if (!rawBuldNm || rawBuldNm.length < 2) return [];
+
+    const cleanedFullNm = rawBuldNm.replace(/\s/g, ''); // 띄어쓰기 제거한 전체 이름 (예: 양주회천15단지)
+    const siNm = addressInfo.siNm;
+    const sggNm = addressInfo.sggNm;
+
+    let names = new Set();
+    
+    // 1. Full name (cleaned)
+    names.add(cleanedFullNm);
+    
+    // 2. Last part containing number + '단지' (가장 효과적이었던 '15단지' 추출)
+    const matchDanji = cleanedFullNm.match(/(\d+단지)$/);
+    if (matchDanji) names.add(matchDanji[1]); 
+    
+    // 3. First word/prefix (예: 양주회천)
+    const firstWord = rawBuldNm.split(/\s+/)[0];
+    if (firstWord && firstWord !== cleanedFullNm) names.add(firstWord);
+    
+    // 4. 모든 단어 파편 추출
+    rawBuldNm.split(/\s+/).forEach(part => {
+        if (part && part.length >= 2) names.add(part);
+    });
+
+    // 🚨 최종 필터링: 행정구역명 제거
+    const filterOutNames = [siNm, sggNm, siNm.replace(/도|시|특별시|광역시/g, ''), sggNm.replace(/시|군|구/g, '')];
+
+    return Array.from(names).filter(name => {
+        // 이름이 행정구역 명칭과 일치하면 제외 (예: '양주'를 제외)
+        return name && name.length > 1 && !filterOutNames.includes(name);
+    });
+}
+
+
+// 5.2 🆕 승강기 정보 조회 함수 (B553664 서비스 ID 사용)
 async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     if (!buldNm || !siNm) {
         return { count: 0, items: [] };
@@ -128,6 +166,7 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     
     // 🚨 URL 수정: B553664 서비스 ID 사용
     const ELEVATOR_BASE_URL = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`;
+    const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
 
     const params = {
         serviceKey: ELEVATOR_KEY, 
@@ -145,7 +184,7 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
 
     try {
         const res = await fetch(url.toString());
-        const text = await res.text(); 
+        const text = await res.text(); // 🚨 텍스트로 먼저 받기
 
         if (!res.ok) {
             console.error(`[ELEVATOR-ERROR] HTTP ${res.status} 오류: ${text.substring(0, 50)}...`);
@@ -182,37 +221,15 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     }
 }
 
-// 5.3 🆕 승강기 정보 기반 요약 및 판단 함수
-function getElevatorSummary(elevatorItems) {
-    if (!elevatorItems || elevatorItems.length === 0) {
-        return { isMultiUse: false, maxFloor: 0, reason: "승강기 정보 없음" };
-    }
 
-    const maxFloor = Math.max(...elevatorItems.map(item => Number(item.groundFloorCnt) || 0));
-    const isMultiUse = maxFloor >= 16;
-    
-    let reasonText = "";
-    if (isMultiUse) {
-        reasonText = `최고 지상층수 ${maxFloor}층 (나목 기준 충족)`;
-    } else {
-        reasonText = `최고 지상층수 ${maxFloor}층 (나목 기준 미달)`;
-    }
-
-    return {
-        isMultiUse: isMultiUse,
-        maxFloor: maxFloor,
-        reason: reasonText
-    };
-}
-
-
-// 5. 🔄 메인 함수: 주변 지번까지 확장하여 조회 시도 (MOLIT Primary)
+// 5. 🆕 메인 함수: 주변 지번까지 확장하여 조회 시도 (MOLIT Primary)
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
   
   const baseJiNumber = Number(ji); 
   const currentBun = bun;
 
+  // 조회할 부번 목록 생성 (기본: -2, -1, 0, 1, 2)
   const jiOffsets = [-2, -1, 0, 1, 2]; 
 
   let allItems = [];
@@ -243,10 +260,11 @@ async function fetchBuildingRegister(addressInfo) {
 }
 
 
-// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링) - [기존과 동일]
+// 6. 한글화 & 요약 (Node.js 계산 및 내부 필터링)
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
+    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
     const filteredItems = items.filter(it => {
         const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
@@ -254,11 +272,13 @@ function buildSummary(items) {
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         const useAprYear = Number(it.useAprDay?.substring(0, 4)) || 0;
         
+        // --- 1. 불완전 데이터 필터링 ---
         if (totArea === 0 || purpCode === '') {
             if (grndFlrCnt >= 16) return true; 
             return false;
         }
 
+        // --- 2. 엉뚱한 용도 필터링 ---
         const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
         const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
 
@@ -266,6 +286,7 @@ function buildSummary(items) {
             return false;
         }
         
+        // --- 3. 노후도 필터링 ---
         if (useAprYear > 0 && (CURRENT_YEAR - useAprYear) > 40 && grndFlrCnt < 5) {
             return false; 
         }
@@ -273,6 +294,7 @@ function buildSummary(items) {
         return true;
     });
     
+    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
     const 다중이용건물 = filteredItems.filter( 
         (it) =>
             [
@@ -312,7 +334,7 @@ function buildSummary(items) {
     };
 }
 
-// 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함) - [기존과 동일]
+// 7. 룰 기반 판단 (GPT 문장 생성을 위한 최종 근거 데이터 포함)
 function isMultiUseBuilding(summary) {
     const multiUseAreaThreshold = 5000;
     const 최고지상층수 = summary.최고지상층수 || 0;
@@ -354,7 +376,7 @@ function isMultiUseBuilding(summary) {
     };
 }
 
-// 8.1 LLM 판단 (MOLIT 결과 기반) - [기존과 동일]
+// 8.1 LLM 판단 (MOLIT 결과 기반)
 async function llmJudgment(ruleResult) { 
     const { GPT_근거 } = ruleResult;
     
@@ -431,7 +453,7 @@ async function llmElevatorJudgment(summary) {
 }
 
 
-// 9. 웹 클라이언트용 통합 분석 API (카카오톡 라우터 대체)
+// 9. 웹 클라이언트용 통합 분석 API (최종 Hybrid Flow)
 async function apiSummaryHandler(req, res) {
     try {
         // GET 쿼리 또는 POST 바디에서 주소 추출
@@ -444,7 +466,6 @@ async function apiSummaryHandler(req, res) {
 
         // 🚨 유효성 필터링 강화
         if (cleanAddr.length < 2 || cleanAddr.includes('{') || cleanAddr.includes('}')) {
-            console.error(`[INVALID ADDR] 유효하지 않은 주소 형식 감지: ${addr}`);
             return res.status(400).json({ 
                 error: "주소 형식이 올바르지 않습니다. 정확한 주소를 입력해 주세요." 
             });
@@ -469,13 +490,9 @@ async function apiSummaryHandler(req, res) {
         if (summary.총건물수 > 0) {
             console.log(`[MAIN-PATH] 건축물대장 정보 ${summary.총건물수}건 확인.`);
             
-            // 4. 룰 기반 판단
             const ruleResult = isMultiUseBuilding(summary);
-            
-            // 5. LLM 판단 호출
             const llmResult = await llmJudgment(ruleResult);
             
-            // 6. 🖼️ 웹 클라이언트용 JSON 응답 (순수한 데이터 반환)
             return res.json({
                 status: "ok",
                 addressInfo: {
@@ -494,11 +511,10 @@ async function apiSummaryHandler(req, res) {
         
         // 🚨 CASE 2: MOLIT Failure (No data found) -> FALLBACK to Elevator API
         
-        const isZeroJibeon = addressInfo.bun === '0000' && addressInfo.ji === '0000';
-        console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도. (0번지 여부: ${isZeroJibeon})`);
+        console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도.`);
         
-        // 2-1. 승강기 정보 조회
-        const elevatorResult = await fetchElevatorInfo(addressInfo.siNm, addressInfo.sggNm, addressInfo.buldNm);
+        // 2-1. 승강기 정보 파편화 조회 함수로 대체 (건물명 파편화하여 시도)
+        const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
         
         // 2-2. 🚨 Elevator Data Found -> Custom Judgment
         if (elevatorResult.count > 0) {
@@ -513,14 +529,11 @@ async function apiSummaryHandler(req, res) {
                     jibun: addressInfo.jibun
                 },
                 analysis: {
-                    // 승강기 기반 판단 결과
                     llmFinalDecision: llmResult.다중이용건축물,
                     llmReason: llmResult.판단근거
                 },
                 summaryDetails: {
-                    // 폴백 상황임을 명시
                     isFallback: true,
-                    fallbackType: isZeroJibeon ? '0_JIBEON_ELEVATOR_CHECK' : 'MOLIT_FAIL_ELEVATOR_CHECK',
                     elevatorCount: elevatorResult.count,
                     elevatorMaxFloor: elevatorSummary.maxFloor
                 },
@@ -530,9 +543,7 @@ async function apiSummaryHandler(req, res) {
         // 2-3. 🚨 Final Failure
         return res.status(404).json({
             error: "건축물대장 및 승강기 등록 정보를 찾을 수 없습니다.",
-            detail: isZeroJibeon 
-                ? "해당 주소는 지번이 '0번지'이며, 승강기 등록 정보도 없어 건물 존재 여부를 확인할 수 없습니다."
-                : "주변 지번까지 확장하여 조회했으나, 유효한 건축물대장 정보와 승강기 등록 정보가 모두 없습니다."
+            detail: "주변 지번까지 확장하여 조회했으나, 유효한 건축물대장 정보와 승강기 등록 정보가 모두 없습니다."
         });
 
 
@@ -544,7 +555,7 @@ async function apiSummaryHandler(req, res) {
 }
 
 
-// 10. 기존 summary 유지 (레거시 API) - [기존과 동일]
+// 10. 기존 summary 유지 (레거시 API)
 app.get("/summary", async (req, res) => {
     try {
         const addr = req.query.addr;
