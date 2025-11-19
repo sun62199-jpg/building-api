@@ -101,7 +101,7 @@
         </section>
     </div>
 
-    <script>
+<script>
         // --- 교육 구분 상수 ---
         const EDUCATION_MULTI = "비상구출운전 및 승강기관리 교육";
         const EDUCATION_GENERAL = "승강기 관리 교육 (다중이용 건축물 교육 불필요)";
@@ -154,7 +154,6 @@
                     // --- 1. API 오류 및 조회 불가 처리 (HTTP 상태 코드 확인) ---
                     if (!response.ok || data.error) {
                         
-                        // 서버의 에러 메시지를 사용하여 최종 출력 텍스트 구성
                         const customErrorMsg = data.detail ? `${data.error}. 상세: ${data.detail}` : (data.error || `서버 통신 오류 (HTTP ${response.status})`);
                         
                         errorText.textContent = customErrorMsg;
@@ -165,16 +164,18 @@
 
                     // --- 2. 결과 데이터 추출 및 매핑 ---
                     
-                    const isFallback = data.status === 'ok_fallback';
                     const isMultiUse = data.analysis.llmFinalDecision === '예';
+                    const isFallback = data.status === 'ok_fallback';
                     
                     // 데이터 출처에 따라 maxFloor를 가져옵니다.
                     const maxFloor = data.summaryDetails.최고지상층수 || data.summaryDetails.elevatorMaxFloor || 0;
                     const totalAreaSum = data.summaryDetails.가목_연면적_합계?.toFixed(2) || 'N/A';
                     
+                    // 🚨 수정: LLM 출력에서 줄바꿈 및 백틱을 제거하여 HTML 삽입 안전성 확보
+                    let decisionNote = data.analysis.llmReason.replace(/(\r\n|\n|\r)/gm, " ").replace(/`/g, "'");
+
                     // 3. 교육 내용 결정
                     let educationText;
-                    let decisionNote = data.analysis.llmReason;
 
                     if (isMultiUse || maxFloor >= 16) { 
                         educationText = EDUCATION_MULTI;
@@ -264,5 +265,4 @@
             });
         });
     </script>
-</body>
-</html>
+    
