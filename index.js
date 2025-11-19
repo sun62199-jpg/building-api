@@ -1,4 +1,4 @@
-// 1. 기본 세팅 v2.9.2 251119
+// 1. 기본 세팅 v2.9.3 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -547,7 +547,7 @@ async function llmElevatorJudgment(summary) {
         temperature: 0.0, // 안정화
         max_tokens: 300, // 최대 토큰 제한
     });
-    let content = response.choices[0].message.trim();
+    let content = response.choices[0].message.content.trim();
 
     // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨 (LLM 안정화 V2.8.2 반영)
     const startIndex = content.indexOf('{');
@@ -557,7 +557,7 @@ async function llmElevatorJudgment(summary) {
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
         cleanContent = content.substring(startIndex, endIndex + 1);
     } else {
-        // 🚨 JSON 구조를 찾지 못한 경우, 원문 텍스트를 판단 근거로 사용
+        // 🚨 JSON 구조를 찾지 못한 경우, 원문 텍스트를 그대로 판단 근거로 사용
         return {
             다중이용건축물: resultText,
             판단근거: content 
@@ -605,6 +605,9 @@ async function apiSummaryHandler(req, res) {
         // 2. 건축물대장 조회 (주변 지번까지 포함하여 조회)
         const items = await fetchBuildingRegister(addressInfo);
         
+        // 🚨🚨🚨 핵심 수정: MOLIT 성공/실패와 무관하게 승강기 API 무조건 호출 🚨🚨🚨
+        const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
+
         // 3. 필터링 및 요약
         const summary = buildSummary(items); 
         
@@ -618,6 +621,7 @@ async function apiSummaryHandler(req, res) {
             const ruleResult = isMultiUseBuilding(summary);
             const llmResult = await llmJudgment(ruleResult);
             
+            // 4. MOLIT 분석 결과 + 승강기 원본 데이터를 모두 포함하여 반환
             return res.json({
                 status: "ok",
                 addressInfo: {
@@ -630,16 +634,15 @@ async function apiSummaryHandler(req, res) {
                     llmReason: llmResult.판단근거
                 },
                 summaryDetails: summary, 
-                ruleDetails: ruleResult
+                ruleDetails: ruleResult,
+                // 🚨 승강기 비교 데이터 추가
+                elevatorStatus: elevatorResult,
             });
         } 
         
         // 🚨 CASE 2: MOLIT Failure (No data found or Data is Garbage) -> FALLBACK to Elevator API
         
-        console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API로 최종 검증 시도.`);
-        
-        // 2-1. 승강기 정보 파편화 조회 함수로 대체
-        const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
+        console.warn(`[FALLBACK-PATH] 건축물대장 조회 실패/필터링됨. 승강기 API 결과로 최종 검증 시도.`);
         
         // 2-2. 🚨 Elevator Data Found -> Custom Judgment
         if (elevatorResult.count > 0) {
@@ -672,6 +675,7 @@ async function apiSummaryHandler(req, res) {
                     elevatorCount: elevatorResult.count,
                     elevatorMaxFloor: elevatorSummary.maxFloor
                 },
+                elevatorStatus: elevatorResult, // 🚨 승강기 데이터 전체 추가
             });
         }
         
@@ -708,3 +712,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
