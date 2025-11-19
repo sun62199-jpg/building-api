@@ -1,5 +1,4 @@
-// 1. 기본 세팅 v2.9.1 251119
-// 1. 기본 세팅
+// 1. 기본 세팅 v2.9.2 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -179,7 +178,6 @@ async function searchElevatorWithFallbackNames(addressInfo) {
             console.log(`[ELEVATOR-SUCCESS-COLLECT] '${name}'로 ${result.count}건 검색 성공. 전체 수집 중.`);
             allItems.push(...result.items); // 결과를 배열에 추가
             totalCount += result.count;
-            // 🚨 여기서 바로 반환하지 않고 다음 검색어로 넘어갑니다. (데이터 오염 방지)
         }
     }
     
@@ -549,7 +547,7 @@ async function llmElevatorJudgment(summary) {
         temperature: 0.0, // 안정화
         max_tokens: 300, // 최대 토큰 제한
     });
-    let content = response.choices[0].message.content.trim();
+    let content = response.choices[0].message.trim();
 
     // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨 (LLM 안정화 V2.8.2 반영)
     const startIndex = content.indexOf('{');
@@ -559,7 +557,7 @@ async function llmElevatorJudgment(summary) {
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
         cleanContent = content.substring(startIndex, endIndex + 1);
     } else {
-        // 🚨 JSON 구조를 찾지 못한 경우, 원문 텍스트를 그대로 판단 근거로 사용
+        // 🚨 JSON 구조를 찾지 못한 경우, 원문 텍스트를 판단 근거로 사용
         return {
             다중이용건축물: resultText,
             판단근거: content 
@@ -710,5 +708,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
-
