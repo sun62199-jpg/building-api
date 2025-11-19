@@ -1,4 +1,5 @@
 // 1. 기본 세팅 v2.9.1 251119
+// 1. 기본 세팅
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -709,4 +710,5 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
 
