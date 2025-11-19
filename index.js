@@ -1,4 +1,4 @@
-// 1. 기본 세팅 v2.8.2 251119
+// 1. 기본 세팅 v2.9 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -158,7 +158,7 @@ function generateElevatorSearchNames(addressInfo) {
 }
 
 
-// 5.2.2 🆕 승강기 정보 파편화 조회 함수 (수정됨: 모든 결과 수집)
+// 5.2.2 🆕 승강기 정보 파편화 조회 함수 (수정됨: 단계별 검색 및 조기 종료)
 async function searchElevatorWithFallbackNames(addressInfo) {
     const searchNames = generateElevatorSearchNames(addressInfo);
     
@@ -166,23 +166,20 @@ async function searchElevatorWithFallbackNames(addressInfo) {
 
     // 시도/시군구는 Juso 결과값 그대로 사용
     const { siNm, sggNm } = addressInfo;
-    const allItems = []; // 모든 검색 결과를 누적할 배열
-    let totalCount = 0;
-
-
+    
+    // 🚨 핵심 수정: 가장 구체적인 검색어로 유효한 결과가 나오면 즉시 중단
     for (const name of searchNames) {
-        // 5.2. fetchElevatorInfo를 호출 (엔드포인트는 B553664로 수정된 상태)
         const result = await fetchElevatorInfo(siNm, sggNm, name);
         
         if (result.count > 0) {
-            console.log(`[ELEVATOR-SUCCESS-COLLECT] '${name}'로 ${result.count}건 검색 성공. 전체 수집 중.`);
-            allItems.push(...result.items); // 결과를 배열에 추가
-            totalCount += result.count;
+            console.log(`[ELEVATOR-SUCCESS-STOP] '${name}'로 ${result.count}건 검색 성공. 해당 결과만 사용.`);
+            // 🚨 성공한 결과만 반환하고 루프 종료 (데이터 오염 방지)
+            return result; 
         }
     }
     
-    // 모든 검색어를 시도한 후, 전체 결과를 반환합니다.
-    return { count: totalCount, items: allItems };
+    // 모든 검색어를 시도했지만, 유효한 결과가 없는 경우
+    return { count: 0, items: [] };
 }
 
 
@@ -708,4 +705,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
