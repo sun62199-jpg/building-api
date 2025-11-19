@@ -1,4 +1,4 @@
-// 1. 기본 세팅 v2.8 251119
+// 1. 기본 세팅 v2.8.1 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -482,7 +482,7 @@ ${JSON.stringify(GPT_근거, null, 2)}
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.0, // 안정화
-        max_tokens: 300, // ✅ 수정: 최대 토큰 제한 적용
+        max_tokens: 300, // 최대 토큰 제한
     });
     let content = response.choices[0].message.content.trim();
 
@@ -494,21 +494,20 @@ ${JSON.stringify(GPT_근거, null, 2)}
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
         cleanContent = content.substring(startIndex, endIndex + 1);
     } else {
-        // JSON 구조를 찾지 못한 경우
-        console.error("LLM (MOLIT) JSON 추출 실패: ", content.substring(0, 200));
+        // JSON 구조를 찾지 못한 경우, 원문 텍스트를 판단 근거로 사용
         return {
             다중이용건축물: ruleResult.GPT_근거.결과,
-            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
+            판단근거: `[AI 텍스트 원문 폴백] ${content.substring(0, 300)}` 
         };
     }
 
     try {
         return JSON.parse(cleanContent);
     } catch (e) {
-        console.error("LLM JSON 파싱 오류:", cleanContent.substring(0, 50));
+        // 파싱 실패 시에도, JSON에 가장 가까웠던 텍스트를 판단 근거로 사용
         return {
             다중이용건축물: ruleResult.GPT_근거.결과,
-            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
+            판단근거: `[AI 텍스트 파싱 폴백] ${cleanContent.substring(0, 300)}`
         };
     }
 }
@@ -537,7 +536,7 @@ async function llmElevatorJudgment(summary) {
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.0, // 안정화
-        max_tokens: 300, // ✅ 수정: 최대 토큰 제한 적용
+        max_tokens: 300, // 최대 토큰 제한
     });
     let content = response.choices[0].message.content.trim();
 
