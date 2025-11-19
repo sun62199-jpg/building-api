@@ -14,6 +14,9 @@
                         'secondary': '#60A5FA', // Light Blue
                         'highlight': '#FBBF24', // Amber/Yellow
                     },
+                    spacing: {
+                        '110': '28rem', 
+                    }
                 }
             }
         }
@@ -101,7 +104,7 @@
         </section>
     </div>
 
-<script>
+    <script>
         // --- 교육 구분 상수 ---
         const EDUCATION_MULTI = "비상구출운전 및 승강기관리 교육";
         const EDUCATION_GENERAL = "승강기 관리 교육 (다중이용 건축물 교육 불필요)";
@@ -164,18 +167,16 @@
 
                     // --- 2. 결과 데이터 추출 및 매핑 ---
                     
-                    const isMultiUse = data.analysis.llmFinalDecision === '예';
                     const isFallback = data.status === 'ok_fallback';
+                    const isMultiUse = data.analysis.llmFinalDecision === '예';
                     
                     // 데이터 출처에 따라 maxFloor를 가져옵니다.
                     const maxFloor = data.summaryDetails.최고지상층수 || data.summaryDetails.elevatorMaxFloor || 0;
                     const totalAreaSum = data.summaryDetails.가목_연면적_합계?.toFixed(2) || 'N/A';
                     
-                    // 🚨 수정: LLM 출력에서 줄바꿈 및 백틱을 제거하여 HTML 삽입 안전성 확보
-                    let decisionNote = data.analysis.llmReason.replace(/(\r\n|\n|\r)/gm, " ").replace(/`/g, "'");
-
                     // 3. 교육 내용 결정
                     let educationText;
+                    let decisionNote = data.analysis.llmReason;
 
                     if (isMultiUse || maxFloor >= 16) { 
                         educationText = EDUCATION_MULTI;
@@ -230,7 +231,26 @@
                                     <span class="font-medium">판단 근거: ${decisionNote}</span>
                                 </p>
                             </div>
-
+                            
+                            <div class="mt-6 pt-4 border-t border-gray-200">
+                                <h6 class="text-base font-semibold text-gray-700 mb-2">데이터 출처 비교 (정보 확인)</h6>
+                                <div class="flex flex-col sm:flex-row divide-y sm:divide-y-0 sm:divide-x divide-gray-300 border border-gray-200 rounded-lg bg-gray-50 text-sm">
+                                    
+                                    <div class="p-3 w-full sm:w-1/2">
+                                        <p class="font-bold text-primary mb-1">🏛️ 건축물대장 분석</p>
+                                        <p>최고층: <strong>${data.summaryDetails.최고지상층수}F</strong></p>
+                                        <p>연면적 합계: <strong>${data.summaryDetails.가목_연면적_합계.toFixed(2)}㎡</strong></p>
+                                        <p>유효 건물 수: <strong>${data.summaryDetails.총건물수}개</strong></p>
+                                    </div>
+                                    
+                                    <div class="p-3 w-full sm:w-1/2">
+                                        <p class="font-bold text-primary mb-1">🛗 승강기 시스템 확인</p>
+                                        <p>최고층 확인: <strong>${data.summaryDetails.elevatorMaxFloor || 'N/A'}F</strong></p>
+                                        <p>총 승강기 수: <strong>${data.summaryDetails.elevatorCount || 0}대</strong></p>
+                                        <p class="text-xs text-gray-500 mt-1">※ 승강기 정보는 존재 여부만 확인합니다.</p>
+                                    </div>
+                                </div>
+                            </div>
                             ${!isMultiUse ? `
                                 <p class="mt-4 p-3 bg-yellow-50 border border-yellow-300 text-yellow-800 rounded-md text-sm font-medium">
                                     <span class="font-bold">⚠️ 중요:</span> ${maxFloor < 16 ? '다중이용 건축물 교육(비상구출운전)은 불필요합니다.' : '다중이용 건축물 기준(가목)에는 해당하지 않으나, 16층 이상이므로 안전관리 기준을 확인해야 합니다.'}
@@ -239,7 +259,6 @@
                             
                             <div class="mt-4 pt-4 border-t border-gray-100 text-xs text-gray-500">
                                 <p><strong>조회 주소:</strong> ${data.addressInfo.roadAddr}</p>
-                                <p><strong>최고 지상층수:</strong> ${maxFloor}F | <strong>가목 연면적 합계:</strong> ${totalAreaSum}㎡ | <strong>총 건축물 수:</strong> ${finalBuildingCount}개</p>
                                 
                                 <button class="mt-2 text-sm text-blue-600 hover:text-blue-800" onclick="document.getElementById('rawDataCollapse').classList.toggle('hidden')">
                                     ${rawDataSourceName} JSON 원본 보기
@@ -265,4 +284,5 @@
             });
         });
     </script>
-    
+</body>
+</html>
