@@ -1,5 +1,4 @@
-// 1. 기본 세팅 v2.7 251119
-// 1. 기본 세팅
+// 1. 기본 세팅 v2.8 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -102,7 +101,6 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   const res = await fetch(url.toString());
-  const text = await res.text();
   if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
@@ -487,9 +485,12 @@ ${JSON.stringify(GPT_근거, null, 2)}
     let content = response.choices[0].message.content.trim();
 
     // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-        content = jsonMatch[0]; // 중괄호로 감싸진 부분만 사용
+    const startIndex = content.indexOf('{');
+    const endIndex = content.lastIndexOf('}');
+    let cleanContent = content;
+
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+        cleanContent = content.substring(startIndex, endIndex + 1);
     } else {
         // JSON 구조를 찾지 못한 경우
         console.error("LLM (MOLIT) JSON 추출 실패: ", content.substring(0, 200));
@@ -500,9 +501,9 @@ ${JSON.stringify(GPT_근거, null, 2)}
     }
 
     try {
-        return JSON.parse(content);
+        return JSON.parse(cleanContent);
     } catch (e) {
-        console.error("LLM JSON 파싱 오류:", content);
+        console.error("LLM JSON 파싱 오류:", cleanContent);
         return {
             다중이용건축물: ruleResult.GPT_근거.결과,
             판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
@@ -538,9 +539,12 @@ async function llmElevatorJudgment(summary) {
     let content = response.choices[0].message.content.trim();
 
     // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-        content = jsonMatch[0]; // 중괄호로 감싸진 부분만 사용
+    const startIndex = content.indexOf('{');
+    const endIndex = content.lastIndexOf('}');
+    let cleanContent = content;
+
+    if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
+        cleanContent = content.substring(startIndex, endIndex + 1);
     } else {
         // JSON 구조를 찾지 못한 경우
         console.error("LLM (Elevator) JSON 추출 실패: ", content.substring(0, 200));
@@ -551,9 +555,9 @@ async function llmElevatorJudgment(summary) {
     }
 
     try {
-        return JSON.parse(content);
+        return JSON.parse(cleanContent);
     } catch (e) {
-        console.error("LLM JSON 파싱 오류:", content);
+        console.error("LLM JSON 파싱 오류:", cleanContent);
         return {
             다중이용건축물: resultText,
             판단근거: `AI 응답 형식 오류. 서버의 ${resultText} 판단을 따름.`
@@ -594,7 +598,7 @@ async function apiSummaryHandler(req, res) {
         // 3. 필터링 및 요약
         const summary = buildSummary(items); 
         
-        // 🚨 CRITICAL FIX: 실질적 Zero Data 감지
+        // 🚨 CRITICAL CHECK: 실질적 Zero Data 감지
         const summaryIsZero = (summary.최고지상층수 === 0) && (summary.가목_연면적_합계 === 0);
 
         // 🚨 CASE 1: MOLIT Success (Data Found)
