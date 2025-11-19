@@ -1,4 +1,4 @@
-// 1. 기본 세팅 v2.8 251119
+// 1. 기본 세팅 v2.7 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -78,7 +78,7 @@ async function searchAddress(input) {
   };
 }
 
-// 5.1 🚨 보조 함수: 단일 지번으로 MOLIT API 호출
+// 5.1 🚨 보조 함수: 단일 지번으로 MOLIT API 호출 (TEXT 정의 오류 수정)
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   const endpoint = "getBrTitleInfo"; 
 
@@ -101,6 +101,7 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   const res = await fetch(url.toString());
+  const text = await res.text(); // ✅ 수정: text 변수 선언 위치 복구
   if (!res.ok) throw new Error(`건축물대장 API 오류: HTTP ${res.status}`);
 
   let data;
