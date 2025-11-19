@@ -154,8 +154,8 @@
                     // --- 1. API 오류 및 조회 불가 처리 (HTTP 상태 코드 확인) ---
                     if (!response.ok || data.error) {
                         
-                        // 이미지에 나온 에러 텍스트 포맷으로 변경
-                        const customErrorMsg = data.detail ? `조회는 성공했으나, 다중이용 건축물 판단에 사용할 수 있는 유효한 건축물 정보를 찾을 수 없습니다.` : (data.error || `서버 통신 오류 (HTTP ${response.status})`);
+                        // 서버의 에러 메시지를 사용하여 최종 출력 텍스트 구성
+                        const customErrorMsg = data.detail ? `${data.error}. 상세: ${data.detail}` : (data.error || `서버 통신 오류 (HTTP ${response.status})`);
                         
                         errorText.textContent = customErrorMsg;
                         errorMessage.classList.remove('hidden');
