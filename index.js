@@ -1,4 +1,4 @@
-// 1. 기본 세팅 v2.9.4 251119
+// 1. 기본 세팅 v2.9.5 251119
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -121,7 +121,7 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 5.2.1 🆕 승강기 정보 검색어 생성 함수 (파편화 최적화)
+// 5.2.1 🆕 승강기 정보 검색어 생성 함수 (최종 보강)
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
     if (!rawBuldNm || rawBuldNm.length < 2) return [];
@@ -166,20 +166,23 @@ async function searchElevatorWithFallbackNames(addressInfo) {
 
     // 시도/시군구는 Juso 결과값 그대로 사용
     const { siNm, sggNm } = addressInfo;
-    
-    // 🚨🚨🚨 핵심 수정: 가장 구체적인 검색어로 유효한 결과가 나오면 즉시 중단 🚨🚨🚨
+    const allItems = []; // 모든 검색 결과를 누적할 배열
+    let totalCount = 0;
+
+
     for (const name of searchNames) {
+        // 5.2. fetchElevatorInfo를 호출 (엔드포인트는 B553664로 수정된 상태)
         const result = await fetchElevatorInfo(siNm, sggNm, name);
         
         if (result.count > 0) {
-            console.log(`[ELEVATOR-SUCCESS-STOP] '${name}'로 ${result.count}건 검색 성공. 해당 결과만 사용.`);
-            // 🚨 성공한 결과만 반환하고 루프 종료 (데이터 오염 및 타임아웃 방지)
-            return result; 
+            console.log(`[ELEVATOR-SUCCESS-COLLECT] '${name}'로 ${result.count}건 검색 성공. 전체 수집 중.`);
+            allItems.push(...result.items); // 결과를 배열에 추가
+            totalCount += result.count;
         }
     }
     
-    // 모든 검색어를 시도했지만, 유효한 결과가 없는 경우
-    return { count: 0, items: [] };
+    // 모든 검색어를 시도한 후, 전체 결과를 반환합니다.
+    return { count: totalCount, items: allItems };
 }
 
 
@@ -615,9 +618,10 @@ async function apiSummaryHandler(req, res) {
             const ruleResult = isMultiUseBuilding(summary);
             const llmResult = await llmJudgment(ruleResult);
             
-            // 4. 승강기 정보 호출 (MOLIT 성공해도 승강기 정보는 필요함)
+            // 4. 승강기 정보 호출 (MOLIT 성공해도 승강기 정보는 필요함 - 비교대조 목적)
             const elevatorResult = await searchElevatorWithFallbackNames(addressInfo);
             
+            // 6. 🖼️ 웹 클라이언트용 JSON 응답 (MOLIT 데이터 + ELEVATOR 데이터 포함)
             return res.json({
                 status: "ok",
                 addressInfo: {
@@ -631,7 +635,7 @@ async function apiSummaryHandler(req, res) {
                 },
                 summaryDetails: summary, 
                 ruleDetails: ruleResult,
-                // 🚨 승강기 비교 데이터 추가 (MAIN PATH에서도 추가)
+                // 🚨 승강기 비교 데이터 추가
                 elevatorStatus: elevatorResult,
             });
         } 
@@ -711,6 +715,3 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
-
-
-
