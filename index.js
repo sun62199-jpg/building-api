@@ -481,33 +481,36 @@ ${JSON.stringify(GPT_근거, null, 2)}
     const response = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.0, // 안정화
+        temperature: 0.0,
     });
     let content = response.choices[0].message.content.trim();
 
-    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
+    // 🚨🚨🚨 최종 안전화: JSON 추출 및 파싱 🚨🚨🚨
     const startIndex = content.indexOf('{');
     const endIndex = content.lastIndexOf('}');
     let cleanContent = content;
 
+    // JSON 객체의 경계를 정확히 잘라냅니다.
     if (startIndex !== -1 && endIndex !== -1 && endIndex > startIndex) {
         cleanContent = content.substring(startIndex, endIndex + 1);
     } else {
-        // JSON 구조를 찾지 못한 경우
-        console.error("LLM (MOLIT) JSON 추출 실패: ", content.substring(0, 200));
+        // JSON 구조를 전혀 찾지 못한 경우, LLM이 생성한 텍스트를 판단 근거로 사용합니다.
+        const ruleResultText = ruleResult.GPT_근거.결과;
+        const generatedReason = content.replace(/\{[\s\S]*\}/g, '').trim(); // JSON 외의 텍스트 추출 시도
+        
         return {
-            다중이용건축물: ruleResult.GPT_근거.결과,
-            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
+            다중이용건축물: ruleResultText,
+            판단근거: generatedReason || `AI 응답 형식 오류. 서버의 ${ruleResultText} 판단을 따름. (원문: ${content.substring(0, 50)}...)`
         };
     }
 
     try {
         return JSON.parse(cleanContent);
     } catch (e) {
-        console.error("LLM JSON 파싱 오류:", cleanContent);
+        // 파싱이 실패하면 LLM이 생성한 텍스트를 그대로 사용하도록 폴백
         return {
             다중이용건축물: ruleResult.GPT_근거.결과,
-            판단근거: `AI 응답 형식 오류. 서버의 ${ruleResult.GPT_근거.결과} 판단을 따름.`
+            판단근거: `AI 응답 형식 오류 발생. 서버 룰 기반 ${ruleResult.GPT_근거.결과} 판단. (LLM 텍스트: ${cleanContent.substring(0, 50)}...)`
         };
     }
 }
@@ -699,3 +702,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
