@@ -121,7 +121,7 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   return Array.isArray(rawItems) ? rawItems : [rawItems];
 }
 
-// 5.2.1 🆕 승강기 정보 검색어 생성 함수 (최종 보강)
+// 5.2.1 🆕 승강기 정보 검색어 생성 함수 (파편화 최적화)
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
     if (!rawBuldNm || rawBuldNm.length < 2) return [];
@@ -360,23 +360,31 @@ async function fetchBuildingRegister(addressInfo) {
 function buildSummary(items) {
     const CURRENT_YEAR = new Date().getFullYear();
     
-    // 🚨 최종 필터링 로직 (불량 데이터 및 엉뚱한 용도 제거) 🚨
+    // 🚨 1단계: 불완전 데이터 및 부적합 건물 1차 필터링
     const filteredItems = items.filter(it => {
         const purpName = it.mainPurpsCdNm?.trim() || ''; 
         const purpCode = it.mainPurpsCd?.trim() || ''; 
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         
-        // --- 1. 불완전 데이터 필터링만 유지 ---
-        if (totArea === 0 || purpCode === '') {
-            if (grndFlrCnt >= 16) return true; 
+        // --- (A) 치명적 불량 데이터 제거 (0층/0면적) ---
+        // 총면적 0이거나 지상층수 0인데 16층 미만인 데이터는 무조건 제거
+        if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) { 
+             return false;
+        }
+
+        // --- (B) 엉뚱한 용도 필터링 (다중이용건축물과 무관한 용도) ---
+        const isFactoryOrWarehouseCode = purpCode === '17000' || purpCode === '21000';
+        const isFactoryOrWarehouseName = purpName.includes('공장') || purpName.includes('창고') || purpName.includes('위험물');
+
+        if (isFactoryOrWarehouseCode || isFactoryOrWarehouseName) {
             return false;
         }
-        
-        return true;
+
+        return true; 
     });
     
-    // 필터링된 목록을 바탕으로 다중이용건축물 필터링 및 요약
+    // 🚨 2단계: 다중이용건축물 해당 용도만 필터링 (분석 데이터로 사용)
     const 다중이용건물 = filteredItems.filter( 
         (it) =>
             [
@@ -392,6 +400,7 @@ function buildSummary(items) {
             (typeof it.etcPurps === "string" && it.etcPurps.includes("근린생활시설"))
     );
         
+    // 🚨 3단계: 최종 기준 적용 (최고층, 가목 연면적 합계)
     const 최고지상층수 = 다중이용건물.length 
         ? Math.max(...다중이용건물.map(it => Number(it.grndFlrCnt) || 0)) 
         : 0;
@@ -403,8 +412,8 @@ function buildSummary(items) {
     const 가목_용도 = 다중이용건물.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
     
     return {
-        총건물수: filteredItems.length,
-        다중이용건물수: 다중이용건물.length,
+        총건물수: filteredItems.length, // 1차 필터링 통과한 건물 수
+        다중이용건물수: 다중이용건물.length, // 2차 필터링 통과한 건물 수
         최고지상층수: 최고지상층수,
         가목_연면적_합계: 가목_연면적_합계, 
         가목_대표_용도: 가목_용도 ? 가목_용도.mainPurpsCdNm : null, 
@@ -486,6 +495,7 @@ ${JSON.stringify(GPT_근거, null, 2)}
     });
     let content = response.choices[0].message.content.trim();
 
+    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨 (LLM 안정화 V2.8.2 반영)
     const startIndex = content.indexOf('{');
     const endIndex = content.lastIndexOf('}');
     let cleanContent = content;
@@ -539,7 +549,7 @@ async function llmElevatorJudgment(summary) {
     });
     let content = response.choices[0].message.content.trim();
 
-    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨
+    // 🚨🚨🚨 JSON 강제 추출 로직 추가 🚨🚨🚨 (LLM 안정화 V2.8.2 반영)
     const startIndex = content.indexOf('{');
     const endIndex = content.lastIndexOf('}');
     let cleanContent = content;
@@ -698,3 +708,4 @@ app.get("/", (req, res) =>
 app.listen(PORT, () =>
     console.log(`서버 실행 중 ▶ http://localhost:${PORT}`)
 );
+
