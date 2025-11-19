@@ -13,12 +13,7 @@
                         'primary': '#1E3A8A', // Dark Blue
                         'secondary': '#60A5FA', // Light Blue
                         'highlight': '#FBBF24', // Amber/Yellow
-                        'soft-red': '#FEF2F2', // Light pink for error background
-                        'deep-red': '#DC2626', // Deep red for error text/icon
                     },
-                    spacing: {
-                        '110': '28rem', 
-                    }
                 }
             }
         }
@@ -29,6 +24,7 @@
             font-family: 'Inter', sans-serif;
             background-color: #F3F4F6;
         }
+        /* JSON Viewer Styling */
         .json-viewer { 
             background-color: #F0F4F8; 
             padding: 15px; 
@@ -62,8 +58,7 @@
             </label>
             <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
                 <input type="text" id="addressInput" placeholder="예: 서울특별시 강남구 테헤란로 123"
-                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-sm focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm"
-                       value="경기 양주시 회천중앙로 282">
+                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-sm focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm">
                 <button id="checkButton"
                         class="px-5 py-3 bg-secondary text-white font-bold rounded-lg hover:bg-primary transition duration-300 shadow-md disabled:opacity-50 text-sm">
                     교육 내용 확인하기
@@ -174,8 +169,8 @@
                     const isMultiUse = data.analysis.llmFinalDecision === '예';
                     
                     // 데이터 출처에 따라 maxFloor를 가져옵니다.
-                    const maxFloor = data.summaryDetails?.최고지상층수 || data.summaryDetails?.elevatorMaxFloor || 0;
-                    const totalAreaSum = data.summaryDetails?.가목_연면적_합계?.toFixed(2) || 'N/A';
+                    const maxFloor = data.summaryDetails.최고지상층수 || data.summaryDetails.elevatorMaxFloor || 0;
+                    const totalAreaSum = data.summaryDetails.가목_연면적_합계?.toFixed(2) || 'N/A';
                     
                     // 3. 교육 내용 결정
                     let educationText;
