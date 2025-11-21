@@ -12,23 +12,19 @@ const OpenAI = require("openai");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 2. 환경변수 확인
+// 2. 환경변수
 const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
-  console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
-}
-
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) console.warn("⚠️ 필수 환경변수 확인 필요");
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-// 3. 미들웨어
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. JUSO 주소 검색
+// 4. JUSO 검색
 async function searchAddress(input) {
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
   const params = { confmKey: JUSO_KEY, currentPage: "1", countPerPage: "5", keyword: input, resultType: "json" };
@@ -48,7 +44,7 @@ async function searchAddress(input) {
   } catch (e) { return null; }
 }
 
-// 5. 데이터 조회 함수들
+// 5. 데이터 조회
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
   const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
@@ -141,6 +137,7 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
+// 6. MOLIT 요약
 function buildMolitSummary(items) {
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
@@ -151,101 +148,93 @@ function buildMolitSummary(items) {
         return true;
     });
     
-    // 🚨 최고층수: 용도 불문하고 전체 데이터에서 계산
     const maxFloor = filtered.length ? Math.max(...filtered.map(it => Number(it.grndFlrCnt) || 0)) : 0;
-
     const daJungList = filtered.filter(it => ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
     const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
     const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
-
     return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType?.mainPurpsCdNm || null, items: daJungList };
 }
 
-// ============================================================
-// 7. 안전 등급 결정 (Node.js)
-// ============================================================
+// 7. 1차 판단 (Node.js Rule Engine)
 function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
-    const THRESHOLD_AREA = 5000;
-    const THRESHOLD_FLOOR = 16;
-
     const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
     const hasElevatorData = elevatorSummary.maxFloor > 0;
     const assumedElevator = (molitSummary.totalCount > 0 && finalMaxFloor >= 2);
     
-    const isGaMok = gaMokArea >= THRESHOLD_AREA;
-    const isNaMok = finalMaxFloor >= THRESHOLD_FLOOR;
+    const isGaMok = gaMokArea >= 5000;
+    const isNaMok = finalMaxFloor >= 16;
 
-    // [RED] 특수 관리 (12시간) - 다중이용 또는 16층 이상
+    // [RED] 특수 관리
     if (isGaMok || isNaMok) {
-        // 🚨 핵심: LLM에게 헷갈리지 말라고 '정확한 이유(Trigger)'를 텍스트로 전달
-        let triggerReason = "";
-        if (isGaMok) triggerReason = `가목 기준(용도: ${molitSummary.gaMokType}, 면적: ${gaMokArea}㎡)을 충족`;
-        else triggerReason = `나목 기준(16층 이상, 실제 ${finalMaxFloor}층)을 충족`;
-
         return {
-            code: 'RED',
-            badge: '교육 대상',
-            colorTheme: 'red', // 🚨 무조건 Red
-            title: '비상구출운전 승강기관리교육(12시간)',
+            code: 'RED', badge: '교육 대상', colorTheme: 'red', title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
-            // LLM에게 전달할 명확한 힌트
-            llm_hint: `이 건물은 ${triggerReason}하여 다중이용건축물(특수 관리 대상)입니다. 면적이 0이라도 16층 이상이면 특수 관리 대상입니다.`,
-            desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea}㎡) 기준을 초과하여 특수 관리 대상입니다.` : `16층 이상(${finalMaxFloor}층) 건축물이므로 특수 관리 대상입니다.`
+            desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준 초과` : `16층 이상(${finalMaxFloor}층) 건축물`
         };
     }
-
-    // [BLUE] 일반 관리 (4시간)
+    // [BLUE] 일반 관리
     if (hasElevatorData || assumedElevator) {
          return {
-            code: 'BLUE',
-            badge: '교육 대상',
-            colorTheme: 'blue', // 🚨 무조건 Blue
-            title: '승강기 관리교육(4시간)',
+            code: 'BLUE', badge: '교육 대상', colorTheme: 'blue', title: '승강기 관리교육(4시간)',
             reason_type: '일반건축물(승강기 보유)',
-            llm_hint: `이 건물은 다중이용건축물 기준에는 미치지 못하지만, 승강기가 있어 일반 관리 교육 대상입니다.`,
-            desc_prefix: '16층 미만이지만 승강기가 설치되어 있어 일반 관리 교육 대상입니다.'
+            desc_prefix: '16층 미만 일반건축물이지만 승강기 보유'
         };
     }
-
     // [GRAY] 대상 아님
     return {
-        code: 'GRAY',
-        badge: '대상 아님',
-        colorTheme: 'gray',
-        title: '교육 의무 없음',
-        reason_type: '대상 아님',
-        llm_hint: '교육 의무가 없습니다.',
-        desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
+        code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
+        reason_type: '대상 아님', desc_prefix: '1층 이하/승강기 미보유'
     };
 }
 
-// 8. LLM 설명 생성 (프롬프트 강화)
-async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
+// ============================================================
+// 🚨 8. LLM 2차 판단 및 설명 (강력한 프롬프트)
+// ============================================================
+async function llmJudgment(gradeInfo, molitSummary, elevatorSummary, isFallback) {
+    const finalMaxFloor = Math.max(molitSummary.maxFloor, elevatorSummary.maxFloor);
+    
     const prompt = `
-    [역할] 건축물 안전관리 교육 안내 전문가
-    [데이터]
-    - 최종판단: ${gradeInfo.title}
-    - 결정이유: ${gradeInfo.llm_hint} (이 이유를 반드시 인용할 것!)
-    - 상세정보: 건축물대장(최고 ${molitSummary.maxFloor}층, 가목면적 ${molitSummary.gaMokArea}㎡), 승강기정보(최고 ${elevatorSummary.maxFloor}층).
+    [역할] 너는 대한민국 건축법 및 승강기 안전관리법 전문가야.
     
+    [입력 데이터]
+    1. 건축물대장 정보: 최고 ${molitSummary.maxFloor}층, 다중이용업종 면적 ${molitSummary.gaMokArea}㎡
+    2. 승강기 정보: 최고 ${elevatorSummary.maxFloor}층 (조회여부: ${elevatorSummary.maxFloor > 0 ? 'O' : 'X'})
+    3. 시스템 1차 판정: ${gradeInfo.code} 등급 (${gradeInfo.reason_type})
+    4. 대장 조회 상태: ${isFallback ? '실패(승강기 정보로 대체)' : '성공'}
+
+    [판단 기준 (법적 근거)]
+    1. '특수 관리 대상(다중이용건축물)'은 다음 중 하나라도 만족하면 해당됨 (YES):
+       - 가목: 판매/문화/종교 등 특정 용도 면적 합계가 5,000㎡ 이상.
+       - 나목: 층수가 16층 이상. (※ 중요: 면적이 0이라도 16층 이상이면 무조건 YES)
+    2. 위 기준에 미달하지만 승강기가 있거나 2층 이상이면 '일반 관리 대상'임.
+
     [지시사항]
-    위 '결정이유'를 바탕으로 사용자에게 결과의 이유를 친절하게 설명하는 한 문장을 작성하세요.
-    주의: 면적이 0㎡라도 16층 이상이면 다중이용건축물이므로, 면적이 부족하다는 말은 하지 마세요.
-    
-    [출력] JSON 형식: {"message": "설명 문장"}
+    위 데이터와 기준을 바탕으로 최종 판단(예/아니오)을 내리고, 그 이유를 사용자에게 친절하게 설명해줘.
+    - 특히 '나목(16층)' 기준을 철저히 체크할 것.
+    - 데이터 불일치 시(대장X, 승강기O) 승강기 정보를 신뢰하여 보수적으로 판단할 것.
+
+    [출력 형식]
+    JSON 포맷만 출력: {"decision": "예/아니오", "reason": "판단 이유 및 설명 문장"}
     `;
 
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, max_tokens: 300,
+            temperature: 0.0, max_tokens: 350,
         });
         const content = response.choices[0].message.content.trim();
+        
+        // JSON 강제 추출
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
-        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1)).message;
-        return gradeInfo.desc_prefix; 
-    } catch (e) { return gradeInfo.desc_prefix; }
+        if (s !== -1 && e !== -1) {
+            return JSON.parse(content.substring(s, e + 1));
+        }
+        // 파싱 실패 시 텍스트 그대로 사용
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: content };
+    } catch (e) {
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생하여 시스템 판단을 따름)" };
+    }
 }
 
 // 9. API 핸들러
@@ -266,27 +255,34 @@ async function apiSummaryHandler(req, res) {
         const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
         const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
 
+        // Fallback 여부: MOLIT 데이터가 사실상 없을 때
         const isFallback = (molitSummary.totalCount === 0) || (molitSummary.maxFloor === 0 && molitSummary.gaMokArea === 0);
         
         if (isFallback && elevatorResult.count === 0) {
              return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
         }
 
+        // 1차: Node.js Rule Engine
         const gradeInfo = determineSafetyGrade(molitSummary, elevatorSummary, isFallback);
-        const llmDescription = await generateLLMDescription(gradeInfo, molitSummary, elevatorSummary);
+        
+        // 2차: LLM Judge & Explain
+        const llmResult = await llmJudgment(gradeInfo, molitSummary, elevatorSummary, isFallback);
 
+        // UI 응답 생성
         res.json({
-            status: "ok",
+            status: isFallback ? "ok_fallback" : "ok",
             uiRender: {
                 badgeText: gradeInfo.badge,
                 colorTheme: gradeInfo.colorTheme,
                 mainTitle: gradeInfo.title,
-                description: llmDescription
+                description: llmResult.reason // LLM이 생성한 설명
             },
             analysis: {
-                ruleBased: gradeInfo.code, // RED, BLUE, GRAY ...
-                llmFinalDecision: (gradeInfo.code === 'RED') ? '예' : '아니오',
-                llmReason: llmDescription
+                // 1차 판단 결과 (시스템)
+                ruleBased: (gradeInfo.code === 'RED') ? '다중이용건축물 (특수)' : (gradeInfo.code === 'BLUE' ? '일반건축물 (일반)' : '해당 없음'),
+                // 2차 판단 결과 (AI)
+                llmFinalDecision: llmResult.decision, 
+                llmReason: llmResult.reason
             },
             data: {
                 address: addressInfo.roadAddr,
