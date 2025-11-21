@@ -189,51 +189,113 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
 }
 
 // ============================================================
-// 🚨 8. LLM 2차 판단 및 설명 (강력한 프롬프트)
+// 8. LLM 판단 및 설명 생성 (이중 검증: Node.js 판정 + AI 재검토)
 // ============================================================
-async function llmJudgment(gradeInfo, molitSummary, elevatorSummary, isFallback) {
-    const finalMaxFloor = Math.max(molitSummary.maxFloor, elevatorSummary.maxFloor);
-    
-    const prompt = `
-    [역할] 너는 대한민국 건축법 및 승강기 안전관리법 전문가야.
-    
-    [입력 데이터]
-    1. 건축물대장 정보: 최고 ${molitSummary.maxFloor}층, 다중이용업종 면적 ${molitSummary.gaMokArea}㎡
-    2. 승강기 정보: 최고 ${elevatorSummary.maxFloor}층 (조회여부: ${elevatorSummary.maxFloor > 0 ? 'O' : 'X'})
-    3. 시스템 1차 판정: ${gradeInfo.code} 등급 (${gradeInfo.reason_type})
-    4. 대장 조회 상태: ${isFallback ? '실패(승강기 정보로 대체)' : '성공'}
 
-    [판단 기준 (법적 근거)]
-    1. '특수 관리 대상(다중이용건축물)'은 다음 중 하나라도 만족하면 해당됨 (YES):
-       - 가목: 판매/문화/종교 등 특정 용도 면적 합계가 5,000㎡ 이상.
-       - 나목: 층수가 16층 이상. (※ 중요: 면적이 0이라도 16층 이상이면 무조건 YES)
-    2. 위 기준에 미달하지만 승강기가 있거나 2층 이상이면 '일반 관리 대상'임.
+// 8.1 메인 판단 (MOLIT + 승강기 데이터 통합 분석)
+async function llmJudgment(gradeInfo, molitSummary, elevatorSummary) {
+    // 데이터 준비
+    const molitFloor = molitSummary.maxFloor || 0;
+    const elevFloor = elevatorSummary.maxFloor || 0;
+    const finalFloor = Math.max(molitFloor, elevFloor); // 둘 중 높은 층수
+    const area = molitSummary.gaMokArea || 0;
+
+    const prompt = `
+    [역할] 너는 대한민국 건축법(다중이용건축물) 판별 전문가야.
+    
+    [분석 데이터]
+    1. 건축물대장: 최고 ${molitFloor}층, 가목대상 면적 ${area}㎡
+    2. 승강기정보: 최고 ${elevFloor}층
+    3. 시스템 1차 판정: ${gradeInfo.code} (${gradeInfo.reason_type})
+
+    [판단 기준 (엄격 적용)]
+    1. 층수 기준: 건축물대장과 승강기 정보 중 **더 높은 층수(${finalFloor}층)**를 기준으로 한다. 이 층수가 16층 이상이면 무조건 '예'.
+    2. 면적 기준: 가목대상 면적이 5,000㎡ 이상이면 '예'.
+    3. 위 두 가지 중 하나라도 해당하면 '예', 아니면 '아니오'.
 
     [지시사항]
-    위 데이터와 기준을 바탕으로 최종 판단(예/아니오)을 내리고, 그 이유를 사용자에게 친절하게 설명해줘.
-    - 특히 '나목(16층)' 기준을 철저히 체크할 것.
-    - 데이터 불일치 시(대장X, 승강기O) 승강기 정보를 신뢰하여 보수적으로 판단할 것.
-
+    위 기준에 따라 **다중이용건축물 해당 여부(예/아니오)**를 직접 다시 판단하고, 
+    사용자가 이해하기 쉽게 **그 이유(층수 또는 면적)**를 설명하는 문장을 작성해줘.
+    
     [출력 형식]
-    JSON 포맷만 출력: {"decision": "예/아니오", "reason": "판단 이유 및 설명 문장"}
+    반드시 JSON 포맷으로만 응답할 것 (설명문구 없이 JSON만):
+    {"decision": "예/아니오", "reason": "판단 근거 설명"}
     `;
 
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, max_tokens: 350,
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.0, // 창의성 배제 (정답 유도)
+            max_tokens: 300,  // 길이 제한
+        });
+        
+        const content = response.choices[0].message.content.trim();
+        
+        // 🚨 JSON 강제 추출 (안전 장치)
+        const s = content.indexOf('{');
+        const e = content.lastIndexOf('}');
+        
+        if (s !== -1 && e !== -1) {
+             return JSON.parse(content.substring(s, e + 1));
+        }
+        
+        // 파싱 실패 시 원문 텍스트를 근거로 반환 (서비스 중단 방지)
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: content };
+
+    } catch (e) {
+        console.error("LLM Error:", e.message);
+        // API 오류 시 시스템 1차 판정을 그대로 사용
+        return { 
+            decision: gradeInfo.code === 'RED' ? '예' : '아니오', 
+            reason: `AI 분석 중 오류가 발생하여 시스템 판단(${gradeInfo.desc_prefix})을 따릅니다.` 
+        };
+    }
+}
+
+// 8.2 승강기 데이터 단독 판단 (Fallback 전용)
+async function llmElevatorJudgment(elevatorSummary) {
+    const floor = elevatorSummary.maxFloor;
+    const isMulti = floor >= 16;
+    const resultText = isMulti ? "예" : "아니오";
+
+    const prompt = `
+    [상황] 건축물대장이 조회되지 않아 승강기 정보로만 판단해야 함.
+    [데이터] 승강기 정보 기준 최고 층수: ${floor}층.
+    
+    [판단 기준]
+    - 16층 이상이면 다중이용건축물('예').
+    - 16층 미만이면 해당 없음('아니오').
+
+    [지시사항]
+    위 기준으로 판단(예/아니오)하고, "건축물대장이 조회되지 않아 승강기 정보(${floor}층)를 기준으로 판단했다"는 내용을 포함하여 설명해줘.
+
+    [출력 형식]
+    JSON 포맷: {"decision": "예/아니오", "reason": "설명 문장"}
+    `;
+    
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.0,
+            max_tokens: 300,
         });
         const content = response.choices[0].message.content.trim();
         
-        // JSON 강제 추출
-        const s = content.indexOf('{'), e = content.lastIndexOf('}');
+        const s = content.indexOf('{');
+        const e = content.lastIndexOf('}');
+        
         if (s !== -1 && e !== -1) {
-            return JSON.parse(content.substring(s, e + 1));
+             return JSON.parse(content.substring(s, e + 1));
         }
-        // 파싱 실패 시 텍스트 그대로 사용
-        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: content };
+        return { decision: resultText, reason: content };
+
     } catch (e) {
-        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생하여 시스템 판단을 따름)" };
+        return { 
+            decision: resultText, 
+            reason: `승강기 정보(${floor}층)를 기준으로 ${resultText}로 판단했습니다. (AI 오류)` 
+        };
     }
 }
 
