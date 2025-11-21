@@ -215,89 +215,103 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     };
 }
 
-// 8. LLM 설명 생성
-async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
+// 8. LLM 판단 및 설명 생성
+async function llmJudgment(molitSummary, elevatorSummary) {
+    // AI에게 판단을 맡기기 위해 가공되지 않은 Raw Data를 줍니다.
+    const dataContext = {
+        "건축물대장_최고층": molitSummary.maxFloor,
+        "건축물대장_가목면적": molitSummary.gaMokArea,
+        "건축물대장_가목용도": molitSummary.gaMokType,
+        "승강기_최고층": elevatorSummary.maxFloor,
+        "데이터_출처_상태": (molitSummary.totalCount === 0) ? "건축물대장 없음(승강기만 존재)" : "정상"
+    };
+
     const prompt = `
-    상황: 건물 안전관리 교육 안내.
-    판단: ${gradeInfo.reason_type}.
-    데이터: 건축물대장(최고 ${molitSummary.maxFloor}층, 가목면적 ${molitSummary.gaMokArea}㎡), 승강기정보(최고 ${elevatorSummary.maxFloor}층).
-    기본설명: "${gradeInfo.desc_prefix}"
+    [역할] 너는 건축법 전문가 AI야.
+    [데이터] ${JSON.stringify(dataContext)}
+    [판단 기준] 다중이용건축물 여부(예/아니오)를 판단해.
+    1. 가목: '건축물대장_가목용도'가 존재하고 '건축물대장_가목면적'이 5000㎡ 이상이면 '예'.
+    2. 나목: '건축물대장_최고층'과 '승강기_최고층' 중 더 높은 층수가 16층 이상이면 '예'.
+    3. 위 두 가지 중 하나라도 해당하면 '예', 아니면 '아니오'.
     
-    요청: 위 기본설명을 바탕으로 사용자에게 안내하는 문장 작성. (JSON {"message": "문장"})
+    [출력 형식]
+    반드시 JSON 포맷으로만 응답해.
+    {"decision": "예/아니오", "reason": "판단 근거를 한 문장으로 요약"}
     `;
 
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, max_tokens: 200,
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.0, // 정답을 요구하므로 창의성 0
+            max_tokens: 300,
         });
+        
         const content = response.choices[0].message.content.trim();
+        
+        // JSON 강제 추출 (안전 장치)
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
-        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1)).message;
-        return gradeInfo.desc_prefix; 
-    } catch (e) { return gradeInfo.desc_prefix; }
+        if (s !== -1 && e !== -1) {
+             return JSON.parse(content.substring(s, e + 1));
+        }
+        // 파싱 실패 시 텍스트만 반환
+        return { decision: "판단 불가", reason: content };
+
+    } catch (e) {
+        return { decision: "오류", reason: "AI 판단 중 오류가 발생했습니다." };
+    }
 }
 
-// 9. API 핸들러
+// 9. API 핸들러 (최종 통합)
 async function apiSummaryHandler(req, res) {
     try {
         const addr = req.body.addr;
         if (!addr) return res.status(400).json({ error: "주소 필요" });
 
+        // 1. Juso 검색
         const addressInfo = await searchAddress(addr);
         if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
 
+        // 2. 병렬 조회
         const [molitItems, elevatorResult] = await Promise.all([
             fetchBuildingRegister(addressInfo).catch(() => []),
             searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
         ]);
 
+        // 3. 데이터 요약
         const molitSummary = buildMolitSummary(molitItems);
         const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
         const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
 
-        // Fallback 여부
+        // 4. Fallback 여부
         const isFallback = (molitSummary.totalCount === 0) || (molitSummary.maxFloor === 0 && molitSummary.gaMokArea === 0);
         
         if (isFallback && elevatorResult.count === 0) {
-             return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
+             return res.status(404).json({ error: "건축물 정보 없음", detail: "조회된 데이터가 없습니다." });
         }
 
-        // 1차 판단 (Node.js)
+        // 5. 1차 판단 (Node.js - 법적 기준)
         const gradeInfo = determineSafetyGrade(molitSummary, elevatorSummary, isFallback);
         
-        // 2차 설명 (LLM)
-        const llmDescription = await generateLLMDescription(gradeInfo, molitSummary, elevatorSummary);
+        // 6. 2차 판단 (LLM - AI 분석)
+        const llmResult = await llmJudgment(molitSummary, elevatorSummary);
 
+        // 7. 응답 생성
         res.json({
             status: "ok",
             uiRender: {
                 badgeText: gradeInfo.badge,
                 colorTheme: gradeInfo.colorTheme,
                 mainTitle: gradeInfo.title,
-                description: llmDescription
+                // LLM의 설명을 메인 설명으로 사용
+                description: llmResult.reason 
             },
-            // 🚨 Client 호환성을 위한 데이터 구조 복구
             analysis: {
-                ruleBased: (gradeInfo.code === 'RED') ? 'YES' : 'NO', // 특수관리 여부
-                llmFinalDecision: (gradeInfo.code === 'RED') ? '예' : '아니오',
-                llmReason: llmDescription
+                ruleBased: (gradeInfo.code === 'RED') ? '다중이용건축물' : '일반건축물', // Node.js 판단
+                llmFinalDecision: llmResult.decision, // LLM 판단
+                llmReason: llmResult.reason
             },
-            addressInfo: { // 🚨 Root level addressInfo 추가 (중요)
-                roadAddr: addressInfo.roadAddr,
-                jibun: addressInfo.jibun
-            },
-            summaryDetails: { // 🚨 HTML이 참조하는 한글 키값 데이터 복구
-                총건물수: molitSummary.totalCount,
-                최고지상층수: molitSummary.maxFloor,
-                가목_연면적_합계: molitSummary.gaMokArea,
-                가목_대표_용도: molitSummary.gaMokType,
-                elevatorCount: elevatorResult.count,
-                elevatorMaxFloor: elevatorSummary.maxFloor,
-                elevatorSource: bestElevator ? '승강기 정보 있음' : '승강기 정보 없음',
-                다중이용건물: molitSummary.items
-            },
-            data: { // 신규 포맷 (예비용)
+            data: {
                 address: addressInfo.roadAddr,
                 molit: { floor: molitSummary.maxFloor, area: molitSummary.gaMokArea },
                 elevator: { floor: elevatorSummary.maxFloor, count: elevatorResult.count },
@@ -312,6 +326,8 @@ async function apiSummaryHandler(req, res) {
     }
 }
 
+// ... (라우팅 및 실행 코드는 동일)
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
+
