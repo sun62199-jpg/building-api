@@ -38,7 +38,7 @@
             <h1 class="text-2xl sm:text-3xl font-extrabold text-primary mb-1">
                 스마트 교육 안내 시스템
             </h1>
-            <p class="text-gray-600 text-sm sm:text-base">
+            <p class="text-gray-600 text-sm">
                 건물 주소로 법정 의무교육을 확인하세요.
             </p>
         </header>
@@ -84,7 +84,7 @@
              <h3 class="font-semibold text-primary mb-2">💡 이용 안내</h3>
              <ul class="list-disc list-inside text-gray-600 space-y-1">
                  <li>건축물대장과 승강기 정보를 교차 분석하여 안내합니다.</li>
-                 <li>데이터 불일치 시 현장 확인이 필요할 수 있습니다.</li>
+                 <li>데이터가 일치하지 않을 경우 현장 확인이 필요할 수 있습니다.</li>
              </ul>
          </section>
     </div>
@@ -97,7 +97,6 @@
         const ERR_TEXT = document.getElementById('errorText');
         const LOADER = document.getElementById('loadingIndicator');
 
-        // JSON 뷰어 토글 함수
         window.toggleJson = function() {
             const viewer = document.getElementById('jsonViewer');
             viewer.classList.toggle('hidden');
@@ -124,32 +123,27 @@
                     body: JSON.stringify({ addr })
                 });
                 
-                // 안전한 JSON 파싱
-                const json = await res.text().then(text => {
-                    try { return JSON.parse(text); } 
-                    catch { return { error: '서버 응답 형식 오류', detail: text.substring(0, 100) }; }
-                });
+                const json = await responseJsonSafe(res);
 
                 if (!res.ok || json.error) {
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // 🚨 Server-Driven UI Rendering 🚨
-                // 서버에서 받은 데이터를 그대로 사용하여 화면을 그립니다.
+                // 🚨 여기가 핵심 변경점! (Server-Driven UI)
+                // 클라이언트는 생각하지 않고, 서버가 준 uiRender 데이터를 그대로 사용합니다.
                 const { uiRender, data, raw } = json;
-
-                // 테마 색상 매핑 (서버가 준 colorTheme 사용)
+                
+                // 색상 테마 매핑
                 const colorMap = {
                     red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600' },
                     blue: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600' },
                     yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600' },
                     gray: { border: 'border-gray-400', bg: 'bg-gray-200', text: 'text-gray-800', title: 'text-gray-600' }
                 };
-                
-                // 예외 처리: 서버가 모르는 색상을 보낼 경우 gray로 폴백
+                // 서버가 준 colorTheme에 맞는 스타일 선택
                 const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
 
-                // HTML 렌더링
+                // HTML 렌더링 (데이터 바인딩만 수행)
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
                         <div class="flex justify-between items-start mb-2">
@@ -206,6 +200,12 @@
                 LOADER.classList.add('hidden');
                 BTN.disabled = false;
             }
+        }
+
+        async function responseJsonSafe(res) {
+            const text = await res.text();
+            try { return JSON.parse(text); } 
+            catch { return { error: '서버 응답 형식 오류', detail: text.substring(0, 100) }; }
         }
 
         BTN.addEventListener('click', search);
