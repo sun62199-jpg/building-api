@@ -24,9 +24,9 @@
         body { font-family: 'Inter', sans-serif; background-color: #F3F4F6; }
         .json-viewer { 
             background-color: #F0F4F8; padding: 12px; border-radius: 6px; 
-            max-height: 250px; overflow-y: scroll; white-space: pre-wrap; 
-            word-wrap: break-word; font-family: monospace; font-size: 0.75rem; 
-            border: 1px solid #E5E7EB; margin-top: 10px;
+            max-height: 250px; overflow-y: auto; white-space: pre-wrap; 
+            word-wrap: break-word; font-family: monospace; font-size: 0.7rem; 
+            border: 1px solid #E5E7EB; margin-top: 10px; color: #374151;
         }
     </style>
 </head>
@@ -38,7 +38,8 @@
             <h1 class="text-2xl sm:text-3xl font-extrabold text-primary mb-1">
                 스마트 교육 안내 시스템
             </h1>
-            <p class="text-gray-600 text-sm sm:text-base">
+            <p class="text-gray-500 font-bold mt-1">김영선</p>
+            <p class="text-gray-600 text-sm sm:text-base mt-2">
                 건물 주소로 법정 의무교육을 확인하세요.
             </p>
         </header>
@@ -84,7 +85,7 @@
              <h3 class="font-semibold text-primary mb-2">💡 이용 안내</h3>
              <ul class="list-disc list-inside text-gray-600 space-y-1">
                  <li>건축물대장과 승강기 정보를 교차 분석하여 안내합니다.</li>
-                 <li>데이터가 일치하지 않을 경우 현장 확인이 필요할 수 있습니다.</li>
+                 <li>데이터 불일치 시 현장 확인이 필요할 수 있습니다.</li>
              </ul>
          </section>
     </div>
@@ -118,11 +119,9 @@
 
             try {
                 const res = await fetch('/api/summary', {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ addr })
                 });
-                
                 const json = await responseJsonSafe(res);
 
                 if (!res.ok || json.error) {
@@ -132,23 +131,21 @@
                 // Server-Driven UI Data
                 const { uiRender, data, raw, analysis } = json;
 
-                // 색상 매핑
                 const colorMap = {
-                    red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600', ruleBg: 'bg-red-50', ruleText: 'text-red-700' },
+                    // 🚨 요청 반영: green(다중), blue(일반)
+                    green: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
                     blue: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' },
                     yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
                     gray: { border: 'border-gray-400', bg: 'bg-gray-200', text: 'text-gray-800', title: 'text-gray-600', ruleBg: 'bg-gray-100', ruleText: 'text-gray-600' }
                 };
                 const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
 
-                // Rule Text (YES/NO -> 한글)
-                const ruleText = analysis.ruleBased === 'YES' ? '해당 (기준 충족)' : '미해당 (기준 미달)';
-                const ruleIcon = analysis.ruleBased === 'YES' ? '🔴' : '⚪';
+                // 🚨 수정: 상세 리포트 텍스트 (일반건축물 vs 다중이용건축물)
+                const ruleText = analysis.ruleBased === 'YES' ? '다중이용건축물' : '일반건축물';
+                const ruleIcon = analysis.ruleBased === 'YES' ? '🏢' : '🏠';
 
-                // HTML 렌더링
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
-                        
                         <div class="flex justify-between items-start mb-2">
                             <div>
                                 <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">
@@ -158,17 +155,20 @@
                             </div>
                         </div>
                         
-                        <div class="bg-white p-3 rounded-lg mb-3 border border-gray-200 shadow-sm">
-                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">필수 교육과정</p>
+                        <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
+                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
                             <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
                                 ${uiRender.mainTitle}
                             </p>
+                            <p class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2 leading-relaxed">
+                                ${uiRender.description}
+                            </p>
                         </div>
 
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 shadow-inner mb-4">
+                        <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4">
                             <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center">
                                 <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                                정보 확인 (데이터 비교)
+                                정보 확인
                             </h6>
                             <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                                 <div class="font-bold text-primary border-b border-gray-300 pb-1">🏛️ 건축물대장</div>
@@ -178,7 +178,7 @@
                                 <div class="pt-1 text-gray-700">최고층: <b>${data.elevator.floor}F</b></div>
                                 
                                 <div class="text-gray-700">가목면적: <b>${data.molit.area}㎡</b></div>
-                                <div class="text-gray-700">보유대수: <b>${data.elevator.count}대</b></div>
+                                <div class="text-gray-700">승강기수: <b>${data.elevator.count}대</b></div>
                                 
                                 <div class="text-gray-400 col-span-2 mt-1 pt-1 border-t border-gray-200 text-[10px]">
                                     * 데이터 출처: ${data.source}
@@ -195,15 +195,6 @@
                                     ${ruleIcon} ${ruleText}
                                 </p>
                             </div>
-
-                            <div class="p-3 rounded-lg border border-gray-300 bg-white">
-                                <p class="text-xs font-bold text-gray-600 mb-1 flex items-center">
-                                    🤖 AI 종합 분석
-                                </p>
-                                <p class="text-xs text-gray-600 leading-relaxed text-justify">
-                                    ${uiRender.description}
-                                </p>
-                            </div>
                         </div>
                         
                         <div class="mt-3 text-right">
@@ -211,7 +202,7 @@
                                 상세 데이터 원본 보기
                             </button>
                         </div>
-                        <div id="jsonViewer" class="json-viewer hidden">${JSON.stringify(raw, null, 2)}</div>
+                        <div id="jsonViewer" class="json-viewer hidden mt-2">${JSON.stringify(raw, null, 2)}</div>
                     </div>
                 `;
                 RESULT.classList.remove('hidden');
