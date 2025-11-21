@@ -1,4 +1,4 @@
-// 1. 기본 세팅 (Version 5_251121 17시22분)
+// 1. 기본 세팅 (Version 5_251121 17시27분)
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -28,7 +28,6 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-
 // 4. JUSO 주소 검색
 async function searchAddress(input) {
   console.log(`[JUSO] 검색 시도: ${input}`);
@@ -51,24 +50,19 @@ async function searchAddress(input) {
     const juso = data.results.juso[0];
     if (!juso) return null;
 
-    const admCd = juso.admCd;
     return {
-        sigunguCd: admCd.substring(0, 5),
-        bjdongCd: admCd.substring(5, 10),
+        sigunguCd: juso.admCd.substring(0, 5),
+        bjdongCd: juso.admCd.substring(5, 10),
         bun: String(juso.lnbrMnnm || "").padStart(4, "0"),
         ji: String(juso.lnbrSlno || "").padStart(4, "0"),
         jibun: `${juso.emdNm} ${juso.lnbrMnnm}-${juso.lnbrSlno}`,
         roadAddr: juso.roadAddr,
-        siNm: juso.siNm, sggNm: juso.sggNm, buldNm: juso.bdNm,
-        rawJuso: juso, 
+        siNm: juso.siNm, sggNm: juso.sggNm, buldNm: juso.bdNm, rawJuso: juso, 
     };
-  } catch (e) {
-      console.error(`[JUSO ERROR] ${e.message}`);
-      return null;
-  }
+  } catch (e) { return null; }
 }
 
-// 5-A. MOLIT API
+// 5. 데이터 조회 함수들
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
   const params = {
@@ -108,11 +102,9 @@ async function fetchBuildingRegister(addressInfo) {
   return [];
 }
 
-// 5-B. Elevator API (Fallback용)
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
     if (!rawBuldNm || rawBuldNm.length < 2) return [];
-
     const cleanedFullNm = rawBuldNm.replace(/\s/g, ''); 
     let names = new Set();
     names.add(cleanedFullNm);
@@ -127,7 +119,6 @@ function generateElevatorSearchNames(addressInfo) {
 
 async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     if (!buldNm || !siNm) return { count: 0, items: [] };
-    
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`);
     const params = {
         serviceKey: ELEVATOR_KEY, pageNo: "1", numOfRows: "100", _type: "json",
@@ -191,7 +182,7 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
-// 6. MOLIT 요약
+// 6. MOLIT 요약 및 필터링 (수정됨)
 function buildMolitSummary(items) {
     const filteredItems = items.filter(it => {
         const purpCode = it.mainPurpsCd?.trim() || ''; 
@@ -202,38 +193,38 @@ function buildMolitSummary(items) {
         return true;
     });
 
+    // 🚨 수정: 최고층수는 용도 상관없이 전체 필터링 목록에서 계산
+    const maxFloor = filteredItems.length ? Math.max(...filteredItems.map(it => Number(it.grndFlrCnt) || 0)) : 0;
+
     const daJungList = filteredItems.filter(it => 
         ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
         .includes(it.mainPurpsCdNm) || (it.etcPurps && it.etcPurps.includes("근린생활시설"))
     );
 
-    const maxFloor = daJungList.length ? Math.max(...daJungList.map(it => Number(it.grndFlrCnt) || 0)) : 0;
     const gaMokArea = daJungList
         .filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm))
         .reduce((sum, it) => sum + Number(it.totArea), 0);
+    
     const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
 
     return {
         totalCount: filteredItems.length,
-        maxFloor: maxFloor,
+        maxFloor: maxFloor, // 🚨 수정된 최고층수 사용
         gaMokArea: gaMokArea,
         gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null,
         items: daJungList
     };
 }
 
-// 7. ⚖️ 이원화 판단 로직 (MOLIT & Elevator)
+// 7. 이원화 판단 로직
 function isMultiUseBuilding(molitSummary, elevatorSummary) {
     const THRESHOLD_AREA = 5000;
     const THRESHOLD_FLOOR = 16;
 
-    // 가목: 오직 MOLIT 기준
     const isGaMok = molitSummary.gaMokArea >= THRESHOLD_AREA;
-
-    // 나목: MOLIT와 승강기 중 더 높은 층수 사용
     const molitFloor = molitSummary.maxFloor;
     const elevFloor = elevatorSummary.maxFloor;
-    const realMaxFloor = Math.max(molitFloor, elevFloor); // 🚨 핵심: 둘 중 큰 값 사용
+    const realMaxFloor = Math.max(molitFloor, elevFloor);
     const isNaMok = realMaxFloor >= THRESHOLD_FLOOR;
 
     let gptReasonData = {};
@@ -247,35 +238,29 @@ function isMultiUseBuilding(molitSummary, elevatorSummary) {
     } else {
         gptReasonData = { 결과: "아니오", 기준: "미해당" };
     }
-
     return { daJung: isGaMok || isNaMok, gptReasonData };
 }
 
-// 8. LLM
-async function llmJudgment(ruleResult) {
-    const { gptReasonData } = ruleResult;
-    const prompt = `
-    데이터: ${JSON.stringify(gptReasonData)}
-    규칙: 결과가 '예'면 이유 설명, '아니오'면 미달 이유. JSON {"result": "예/아니오", "reason": "문장"} 출력.
-    `;
-
+// 8. LLM (안정화)
+async function llmJudgment(ruleResult) { 
+    const { GPT_근거 } = ruleResult;
+    const prompt = `데이터: ${JSON.stringify(GPT_근거)}. 규칙: 결과가 '예'면 이유, '아니오'면 미달 이유 설명. JSON {"result": "예/아니오", "reason": "문장"} 출력.`;
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }], temperature: 0.0, max_tokens: 300,
         });
         const content = response.choices[0].message.content.trim();
-        
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if(s !== -1 && e !== -1) {
             try { return JSON.parse(content.substring(s, e+1)); } catch {}
         }
         return { result: GPT_근거.결과, reason: content };
     } catch (e) {
-        return { result: GPT_근거.결과, reason: `AI 응답 오류. 시스템 판단: ${GPT_근거.결과}` };
+        return { result: GPT_근거.결과, reason: `AI 응답 오류.` };
     }
 }
 
-// 8.2 LLM Elevator (Fallback용)
+// 8.2 LLM Elevator
 async function llmElevatorJudgment(summary) {
     const result = summary.isMultiUse ? "예" : "아니오";
     const prompt = `승강기 데이터: 최고 ${summary.maxFloor}층. 결과: ${result}. 16층 기준 설명. 대장 미조회 언급. JSON {"result": "${result}", "reason": "문장"} 출력.`;
@@ -290,22 +275,20 @@ async function llmElevatorJudgment(summary) {
         }
         return { result: result, reason: content };
     } catch (e) {
-        return { result: result, reason: "승강기 정보 기반 판단입니다. (대장 미조회)" };
+        return { result: result, reason: "승강기 정보 기반 판단." };
     }
 }
 
-// 9. API 핸들러 (병렬 실행)
+// 9. API 핸들러 (병렬 실행 + 강제 병합)
 async function apiSummaryHandler(req, res) {
     try {
         const addr = req.body.addr;
         if (!addr) return res.status(400).json({ error: "주소 필요" });
 
-        // 1. JUSO 검색
         const addressInfo = await searchAddress(addr);
         if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
 
-        // 2. 🚀 병렬 조회 (MOLIT & Elevator)
-        // 승강기 API 오류가 나도 무시하고 진행 (catch로 빈 객체 반환)
+        // 2. 🚀 병렬 조회 (무조건 둘 다 실행)
         const [molitItems, elevatorResult] = await Promise.all([
             fetchBuildingRegister(addressInfo).catch(() => []),
             searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
@@ -316,10 +299,10 @@ async function apiSummaryHandler(req, res) {
         const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
         const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
 
-        // 실질적 Zero Data 확인
+        // 4. 실질적 Zero Data 감지
         const summaryIsZero = (molitSummary.maxFloor === 0) && (molitSummary.gaMokArea === 0);
 
-        // 🚨 CASE 1: MOLIT 데이터 유효 (메인 판단)
+        // CASE 1: MOLIT 데이터 유효 (승강기 정보 합쳐서 리턴)
         if (molitSummary.totalCount > 0 && !summaryIsZero) {
             const ruleResult = isMultiUseBuilding(molitSummary, elevatorSummary);
             const llmResult = await llmJudgment(ruleResult);
@@ -333,15 +316,16 @@ async function apiSummaryHandler(req, res) {
                 },
                 summaryDetails: {
                     ...molitSummary,
+                    // 🚨 승강기 정보 병합
                     elevatorCount: elevatorResult.count,
                     elevatorMaxFloor: elevatorSummary.maxFloor,
-                    elevatorSource: bestElevator ? '승강기 정보 반영됨' : '승강기 정보 없음 (MOLIT 기준 판단)',
-                    다중이용건물: molitSummary.items
+                    elevatorSource: bestElevator ? '승강기 정보 반영됨' : '승강기 정보 없음',
+                    daJungList: molitSummary.items
                 }
             });
         } 
         
-        // 🚨 CASE 2: MOLIT 실패 -> Elevator Only Fallback
+        // CASE 2: MOLIT 실패 -> 승강기 Fallback (기존 유지)
         if (elevatorResult.count > 0 && bestElevator) {
             const llmResult = await llmElevatorJudgment(elevatorSummary);
             return res.json({
@@ -360,18 +344,14 @@ async function apiSummaryHandler(req, res) {
             });
         }
         
-        return res.status(404).json({ 
-            error: "건축물 정보 없음", 
-            detail: "건축물대장 및 승강기 정보가 모두 조회되지 않았습니다." 
-        });
+        return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
 
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
+        res.status(500).json({ error: "서버 오류", detail: err.toString() });
     }
 }
 
-// 10. 라우팅
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
