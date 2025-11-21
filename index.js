@@ -1,4 +1,4 @@
-// 1. 기본 세팅 (Version 4.0_251121 16시22분)
+// 1. 기본 세팅 (Version 4.1_251121 16시34분)
 const express = require("express");
 const path = require("path");
 require("dotenv").config();
@@ -13,11 +13,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // 2. 환경변수 확인
-// 🚨 JUSO_KEY는 제거되고 VWORLD_KEY가 사용됩니다.
-const VWORLD_KEY = process.env.VWORLD_KEY;
+// 🚨 JUSO_KEY 대신 VWORLD_KEY 사용 (표준 명세 적용)
+const VWORLD_KEY = process.env.VWORLD_KEY || "AF6A175C-8C07-335C-87C2-09971E451820"; 
 const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
-const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
+const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY; 
 
 if (!VWORLD_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
   console.warn(
@@ -31,11 +31,13 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. 🆕 V-World 주소 검색 (PNU 기반 정확한 코드 획득)
+// 4. 🆕 V-World 주소 검색 (표준 파라미터 적용)
 async function searchAddress(input) {
   console.log(`[V-WORLD] 검색 시도: ${input}`);
   
   const url = new URL("https://api.vworld.kr/req/search");
+  
+  // 🚨 명세서에 따른 표준 파라미터 설정
   const params = {
     service: "search",
     request: "search",
@@ -44,71 +46,84 @@ async function searchAddress(input) {
     size: "10",
     page: "1",
     query: input,
-    type: "address",
-    category: "road",
+    type: "address",    // 🚨 필수: 주소 검색
+    category: "road",   // 🚨 필수: 도로명 주소 우선
     format: "json",
     errorformat: "json",
-    key: VWORLD_KEY // 🚨 환경 변수 사용
+    key: VWORLD_KEY
   };
   
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
   try {
     const res = await fetch(url.toString());
+    
+    if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`V-World API HTTP Error ${res.status}: ${errText.substring(0, 100)}`);
+    }
+
     const data = await res.json();
 
+    // V-World 응답 상태 확인
     if (data.response?.status !== "OK") {
         console.warn(`[V-WORLD WARN] 검색 실패: ${data.response?.error?.text || '결과 없음'}`);
         return null;
     }
 
     // 가장 정확도 높은 첫 번째 결과 사용
-    const item = data.response.result.items[0];
+    const item = data.response.result.items[0]; 
     if (!item) return null;
 
-    // 🚨 PNU 코드 파싱 (19자리: 시군구5 + 법정동5 + 대지1 + 본번4 + 부번4)
+    // 🚨 PNU 코드 파싱 (id 필드가 PNU 19자리)
     const pnu = item.id; 
+    
     if (!pnu || pnu.length < 19) {
         console.error(`[V-WORLD ERROR] 유효하지 않은 PNU 코드: ${pnu}`);
         return null;
     }
 
+    // PNU 구조: 시군구(5) + 법정동(5) + 대지구분(1) + 본번(4) + 부번(4)
     const sigunguCd = pnu.substring(0, 5);
     const bjdongCd = pnu.substring(5, 10);
-    const landType = pnu.substring(10, 11);
+    const landType = pnu.substring(10, 11); 
     const bun = pnu.substring(11, 15);
     const ji = pnu.substring(15, 19);
 
-    // V-World(1:대지, 2:산) -> MOLIT(0:대지, 1:산) 변환
+    // MOLIT용 대지구분 변환 (V-World 1:대지, 2:산 -> MOLIT 0:대지, 1:산)
     const platGbCd = landType === '2' ? '1' : '0';
 
-    // 건물명 및 주소 텍스트 추출
+    // 주소 문자열 추출
     const roadAddr = item.address?.road || input;
     const jibunAddr = item.address?.parcel || "";
     
-    // 시/군/구 및 건물명 추출 (승강기 API용)
+    // 건물명 추출 (bldnm 필드 우선, 없으면 파싱)
+    let buldNm = item.address?.bldnm || "";
+    
+    if (!buldNm) {
+        // 괄호 안의 내용 추출 시도 (예: "... (덕계동, 양주회천15단지)")
+        const match = roadAddr.match(/\(([^)]+)\)/);
+        if (match) {
+            const parts = match[1].split(",");
+            // 동 이름 제외하고 건물명만 추출
+            for (let part of parts) {
+                part = part.trim();
+                // 숫자로 시작하거나 '동'으로 끝나지 않는 부분을 건물명으로 추정
+                if (!part.endsWith("동") && !part.match(/^\d/)) {
+                    buldNm = part;
+                }
+            }
+            if (!buldNm) buldNm = parts[parts.length - 1].trim();
+        }
+    }
+    if (!buldNm) buldNm = input; 
+
+    // 시도/시군구 이름 추출 (승강기 API용)
     const addrParts = roadAddr.split(" ");
     const siNm = addrParts[0] || "";
     const sggNm = addrParts[1] || "";
-    
-    // 건물명 추출 로직 (괄호 안 내용 우선)
-    let buldNm = "";
-    const match = roadAddr.match(/\(([^)]+)\)/);
-    if (match) {
-        const parts = match[1].split(",");
-        // 동 이름(예: 덕계동)을 제외하고 건물명만 추출 시도
-        for (let part of parts) {
-            part = part.trim();
-            if (!part.endsWith("동") && !part.endsWith("가") && !part.match(/^\d/)) {
-                buldNm = part;
-            }
-        }
-        // 괄호 안에 적절한 게 없으면 마지막 부분 사용
-        if (!buldNm) buldNm = parts[parts.length - 1].trim();
-    }
-    if (!buldNm) buldNm = input; // 최후의 수단
 
-    console.log(`[V-WORLD] PNU 파싱: ${sigunguCd}-${bjdongCd}-${bun}-${ji} / 건물명: ${buldNm}`);
+    console.log(`[V-WORLD] PNU 파싱 완료: ${sigunguCd}-${bjdongCd}-${bun}-${ji} (${buldNm})`);
 
     return {
       sigunguCd, bjdongCd, bun, ji, platGbCd,
@@ -118,19 +133,19 @@ async function searchAddress(input) {
     };
 
   } catch (e) {
-    console.error(`[V-WORLD] 호출 에러: ${e.message}`);
+    console.error(`[V-WORLD] API 호출 에러: ${e.message}`);
     return null;
   }
 }
 
-// 5-A. MOLIT API (PNU 덕분에 지번 확장이 덜 필요하지만 안전장치로 유지)
+// 5-A. MOLIT API 관련 함수들
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji, platGbCd) {
   const url = new URL(
     `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`
   );
   const params = {
     serviceKey: MOLIT_KEY,
-    sigunguCd, bjdongCd, bun, ji,
+    sigunguCd, bjdongCd, bun, ji, 
     platGbCd: platGbCd || "0",
     _type: "json", numOfRows: "100", pageNo: "1"
   };
@@ -155,8 +170,8 @@ async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji, platGbCd) {
 async function fetchBuildingRegister(addressInfo) {
   const { sigunguCd, bjdongCd, bun, ji, platGbCd } = addressInfo;
   
-  // PNU가 정확하므로 기본 지번 우선 조회
-  // 만약을 위해 ±1 범위만 아주 좁게 스캔
+  // V-World PNU는 정확하므로 기본 지번을 최우선으로 조회
+  // 데이터 누락 대비 ±1 범위만 안전하게 스캔
   const baseJi = Number(ji);
   const jiOffsets = [0, -1, 1]; 
 
@@ -174,20 +189,26 @@ async function fetchBuildingRegister(addressInfo) {
   return [];
 }
 
-// 5-B. Elevator API 관련 함수들 (건물명 파편화 & Stop-and-Filter)
+// 5-B. Elevator API 관련 함수들
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
     if (!rawBuldNm || rawBuldNm.length < 2) return [];
 
     const cleanedFullNm = rawBuldNm.replace(/\s/g, '');
-    const names = new Set([cleanedFullNm]);
+    let names = new Set();
     
+    // 1. 전체 이름 (띄어쓰기 제거)
+    names.add(cleanedFullNm);
+    
+    // 2. 숫자+단지 (예: 15단지)
     const matchDanji = cleanedFullNm.match(/(\d+단지)$/);
     if (matchDanji) names.add(matchDanji[1]); 
     
+    // 3. 첫 단어 (예: 양주회천)
     const firstWord = rawBuldNm.split(/\s+/)[0];
     if (firstWord && firstWord !== cleanedFullNm) names.add(firstWord);
 
+    // 행정구역명 필터링 (오검색 방지)
     const filterOut = [
         addressInfo.siNm, addressInfo.sggNm, 
         addressInfo.siNm.replace(/도|시|특별시|광역시/g, ''), 
@@ -198,7 +219,9 @@ function generateElevatorSearchNames(addressInfo) {
 }
 
 async function fetchElevatorInfo(siNm, sggNm, buldNm) {
-    // 🚨 B553664 서비스 ID 사용
+    if (!buldNm || !siNm) return { count: 0, items: [] };
+    
+    // B553664 서비스 사용
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`);
     const params = {
         serviceKey: ELEVATOR_KEY,
@@ -212,7 +235,9 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
         const text = await res.text();
         if (!res.ok) return { count: 0, items: [] };
 
-        const data = JSON.parse(text);
+        let data;
+        try { data = JSON.parse(text); } catch { return { count: 0, items: [] }; }
+
         if (data.response?.header?.resultCode !== "00") return { count: 0, items: [] };
 
         const count = Number(data.response?.body?.totalCount) || 0;
@@ -228,13 +253,13 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
 
 async function searchElevatorWithFallbackNames(addressInfo) {
     const searchNames = generateElevatorSearchNames(addressInfo);
-    console.log(`[ELEVATOR] 검색어 시도: ${searchNames.join(', ')}`);
+    console.log(`[ELEVATOR] 검색 시도: ${searchNames.join(', ')}`);
 
     for (const name of searchNames) {
         const result = await fetchElevatorInfo(addressInfo.siNm, addressInfo.sggNm, name);
         if (result.count > 0) {
             console.log(`[ELEVATOR] 성공: '${name}' (${result.count}건)`);
-            return result; // Stop-and-Filter
+            return result; // Stop-and-Filter (첫 성공 시 중단)
         }
     }
     return { count: 0, items: [] };
@@ -263,6 +288,7 @@ function findBestMatchingElevator(targetName, elevatorItems) {
 
 function getElevatorSummary(elevatorItems) {
     if (!elevatorItems || elevatorItems.length === 0) return { maxFloor: 0 };
+    // divGroundFloorCnt 필드 사용
     const maxFloor = Math.max(...elevatorItems.map(item => Number(item.divGroundFloorCnt) || 0));
     return { maxFloor };
 }
@@ -274,8 +300,9 @@ function buildMolitSummary(items) {
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
 
-        // 0층/0면적 데이터 제거 (단, 16층 이상은 유효)
+        // 불량 데이터 제거 (면적0 & 16층 미만)
         if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
+        // 공장/창고 코드 제거
         if (purpCode === '17000' || purpCode === '21000') return false;
         
         return true;
@@ -296,7 +323,6 @@ function buildMolitSummary(items) {
 
     return {
         totalCount: filteredItems.length,
-        daJungCount: daJungList.length,
         maxFloor: maxFloor,
         gaMokArea: gaMokArea,
         gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null,
@@ -309,10 +335,10 @@ function isMultiUseBuilding(molitSummary, elevatorSummary) {
     const THRESHOLD_AREA = 5000;
     const THRESHOLD_FLOOR = 16;
 
-    // 가목: 오직 MOLIT 기준
+    // 가목: MOLIT 기준
     const isGaMok = molitSummary.gaMokArea >= THRESHOLD_AREA;
 
-    // 나목: MOLIT vs 승강기 중 높은 층수
+    // 나목: MAX(MOLIT, 승강기)
     const molitFloor = molitSummary.maxFloor;
     const elevFloor = elevatorSummary.maxFloor;
     const realMaxFloor = Math.max(molitFloor, elevFloor);
@@ -337,7 +363,7 @@ function isMultiUseBuilding(molitSummary, elevatorSummary) {
     };
 }
 
-// 8. LLM 문장 생성 (JSON 강제 추출 적용)
+// 8. LLM 문장 생성 (안정화)
 async function llmJudgment(ruleResult) {
     const { gptReasonData } = ruleResult;
     const prompt = `
@@ -353,17 +379,17 @@ async function llmJudgment(ruleResult) {
         const response = await openai.chat.completions.create({
             model: "gpt-3.5-turbo",
             messages: [{ role: "user", content: prompt }],
-            temperature: 0.0,
-            max_tokens: 300,
+            temperature: 0.0, max_tokens: 300,
         });
         
         const content = response.choices[0].message.content.trim();
-        // JSON 강제 추출
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
+        
         if(s !== -1 && e !== -1) {
              return JSON.parse(content.substring(s, e+1));
         }
-        return { result: gptReasonData.결과, reason: content }; // Fallback text
+        // JSON 파싱 실패 시 원문 반환
+        return { result: gptReasonData.결과, reason: content };
     } catch (e) {
         return { result: gptReasonData.결과, reason: `AI 응답 오류. 시스템 판단: ${gptReasonData.결과}` };
     }
@@ -375,27 +401,29 @@ async function apiSummaryHandler(req, res) {
         const addr = req.body.addr;
         if (!addr) return res.status(400).json({ error: "주소 필요" });
 
-        // 1. V-WORLD 주소 검색 (PNU)
+        // 1. V-WORLD 주소 검색 (PNU 획득)
         const addressInfo = await searchAddress(addr);
-        if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
+        if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패", detail: "V-World에서 주소를 찾을 수 없습니다." });
 
         // 2. 병렬 조회 (MOLIT & Elevator)
         const [molitItems, elevatorResult] = await Promise.all([
-            fetchBuildingRegister(addressInfo).catch(e => { console.error(e); return []; }),
-            searchElevatorWithFallbackNames(addressInfo).catch(e => { console.error(e); return { count: 0, items: [] }; })
+            fetchBuildingRegister(addressInfo).catch(() => []),
+            searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
         ]);
 
         // 3. 데이터 요약
         const molitSummary = buildMolitSummary(molitItems);
+        
         const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
         const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
 
-        // 4. 유효 데이터 없음 처리
+        // 4. 🛑 유효 데이터 없음 처리 (둘 다 실패 시)
         const summaryIsZero = (molitSummary.maxFloor === 0) && (molitSummary.gaMokArea === 0);
+        
         if (summaryIsZero && elevatorSummary.maxFloor === 0) {
             return res.status(404).json({
-                error: "건축물 정보를 찾을 수 없습니다.",
-                detail: "건축물대장 및 승강기 정보 모두 조회되지 않았습니다."
+                error: "건축물 정보 없음",
+                detail: "건축물대장 및 승강기 정보가 모두 유효하지 않습니다."
             });
         }
 
@@ -435,3 +463,5 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
+
+
