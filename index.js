@@ -12,19 +12,23 @@ const OpenAI = require("openai");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 2. 환경변수
+// 2. 환경변수 확인
 const JUSO_KEY = process.env.JUSO_KEY;
 const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) console.warn("⚠️ 필수 환경변수 확인 필요");
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
+  console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
+}
+
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
+// 3. 미들웨어
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. JUSO 검색
+// 4. JUSO 주소 검색
 async function searchAddress(input) {
   const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
   const params = { confmKey: JUSO_KEY, currentPage: "1", countPerPage: "5", keyword: input, resultType: "json" };
@@ -44,7 +48,7 @@ async function searchAddress(input) {
   } catch (e) { return null; }
 }
 
-// 5. 데이터 조회
+// 5. 데이터 조회 함수들 (MOLIT, Elevator)
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
   const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
@@ -137,7 +141,6 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
-// 6. MOLIT 요약
 function buildMolitSummary(items) {
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
@@ -148,14 +151,17 @@ function buildMolitSummary(items) {
         return true;
     });
     
+    // 층수는 전체 필터링 목록 기준
     const maxFloor = filtered.length ? Math.max(...filtered.map(it => Number(it.grndFlrCnt) || 0)) : 0;
+
     const daJungList = filtered.filter(it => ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
     const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
     const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
+
     return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType?.mainPurpsCdNm || null, items: daJungList };
 }
 
-// 7. 1차 판단 (Node.js Rule Engine)
+// 7. 안전 등급 결정 (1차: Node.js)
 function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
@@ -170,7 +176,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
         return {
             code: 'RED', badge: '교육 대상', colorTheme: 'red', title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
-            desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준 초과` : `16층 이상(${finalMaxFloor}층) 건축물`
+            desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준을 초과하여 다중이용건축물입니다.` : `16층 이상(${finalMaxFloor}층) 건축물이므로 다중이용건축물입니다.`
         };
     }
     // [BLUE] 일반 관리
@@ -184,120 +190,71 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     // [GRAY] 대상 아님
     return {
         code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
-        reason_type: '대상 아님', desc_prefix: '1층 이하/승강기 미보유'
+        reason_type: '대상 아님', desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
     };
 }
 
 // ============================================================
-// 8. LLM 판단 및 설명 생성 (이중 검증: Node.js 판정 + AI 재검토)
+// 🚨 8. LLM 판단 및 설명 생성 (할루시네이션 방지 패치 적용)
 // ============================================================
-
-// 8.1 메인 판단 (MOLIT + 승강기 데이터 통합 분석)
-async function llmJudgment(gradeInfo, molitSummary, elevatorSummary) {
-    // 데이터 준비
-    const molitFloor = molitSummary.maxFloor || 0;
-    const elevFloor = elevatorSummary.maxFloor || 0;
-    const finalFloor = Math.max(molitFloor, elevFloor); // 둘 중 높은 층수
+async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
+    // Node.js가 계산한 확정 팩트 (Fact)
+    const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
-
-    const prompt = `
-    [역할] 너는 대한민국 건축법(다중이용건축물) 판별 전문가야.
     
-    [분석 데이터]
-    1. 건축물대장: 최고 ${molitFloor}층, 가목대상 면적 ${area}㎡
-    2. 승강기정보: 최고 ${elevFloor}층
-    3. 시스템 1차 판정: ${gradeInfo.code} (${gradeInfo.reason_type})
+    // 프롬프트 구성: 수학적 비교 결과를 텍스트로 박아넣음
+    const prompt = `
+    [역할]
+    당신은 대한민국 건축법령에 의거한 엄격한 '건축물 안전관리 판별관'입니다.
+    
+    [팩트 데이터 (절대 기준)]
+    1. 건물 최고 층수: ${finalFloor}층 (건축물대장과 승강기 정보 중 최댓값)
+    2. 가목 용도 면적: ${area}㎡
+    3. 시스템 1차 등급 판정: ${gradeInfo.code} (${gradeInfo.reason_type})
 
-    [판단 기준 (엄격 적용)]
-    1. 층수 기준: 건축물대장과 승강기 정보 중 **더 높은 층수(${finalFloor}층)**를 기준으로 한다. 이 층수가 16층 이상이면 무조건 '예'.
-    2. 면적 기준: 가목대상 면적이 5,000㎡ 이상이면 '예'.
-    3. 위 두 가지 중 하나라도 해당하면 '예', 아니면 '아니오'.
+    [법적 판단 기준 (가목 vs 나목)]
+    - **나목(층수) 판단**: ${finalFloor}층은 16층 ${finalFloor >= 16 ? '이상이므로 해당함(O)' : '미만이므로 해당안됨(X)'}.
+    - **가목(면적) 판단**: ${area}㎡는 5,000㎡ ${area >= 5000 ? '이상이므로 해당함(O)' : '미만이므로 해당안됨(X)'}.
 
     [지시사항]
-    위 기준에 따라 **다중이용건축물 해당 여부(예/아니오)**를 직접 다시 판단하고, 
-    사용자가 이해하기 쉽게 **그 이유(층수 또는 면적)**를 설명하는 문장을 작성해줘.
-    
+    위 [팩트 데이터]와 [법적 판단 기준]을 근거로 최종 판단(예/아니오)과 이유를 설명하는 문장을 작성하세요.
+    1. **나목 검토**: 층수가 16층 이상인지 명확히 언급하세요. (예: "15층은 16층 미만이므로 나목에 해당하지 않습니다.")
+    2. **가목 검토**: 면적이 기준(5,000㎡)을 넘는지 언급하세요.
+    3. **결론**: 둘 중 하나라도 해당하면 '예', 둘 다 아니면 '아니오'로 결론 내리세요.
+    4. 시스템 1차 등급 판정(${gradeInfo.code})과 결론이 일치해야 합니다.
+
     [출력 형식]
-    반드시 JSON 포맷으로만 응답할 것 (설명문구 없이 JSON만):
-    {"decision": "예/아니오", "reason": "판단 근거 설명"}
+    JSON 포맷만 출력 (마크다운 없이):
+    {"decision": "예/아니오", "reason": "판단 근거를 요약한 친절한 설명 문장"}
     `;
 
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
+            model: "gpt-3.5-turbo", 
             messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, // 창의성 배제 (정답 유도)
-            max_tokens: 300,  // 길이 제한
+            temperature: 0.0, // 창의성 0% (수치 기반 정답 유도)
+            max_tokens: 350,
         });
         
         const content = response.choices[0].message.content.trim();
         
-        // 🚨 JSON 강제 추출 (안전 장치)
-        const s = content.indexOf('{');
-        const e = content.lastIndexOf('}');
-        
+        // 🚨 JSON 강제 추출 및 파싱 (안전 장치)
+        const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) {
-             return JSON.parse(content.substring(s, e + 1));
+             // JSON 파싱 성공 시 객체 반환
+             const json = JSON.parse(content.substring(s, e + 1));
+             return { decision: json.decision, reason: json.reason };
         }
         
-        // 파싱 실패 시 원문 텍스트를 근거로 반환 (서비스 중단 방지)
-        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: content };
+        // 파싱 실패 시 시스템의 기본 설명 반환
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix };
 
     } catch (e) {
         console.error("LLM Error:", e.message);
-        // API 오류 시 시스템 1차 판정을 그대로 사용
-        return { 
-            decision: gradeInfo.code === 'RED' ? '예' : '아니오', 
-            reason: `AI 분석 중 오류가 발생하여 시스템 판단(${gradeInfo.desc_prefix})을 따릅니다.` 
-        };
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix }; 
     }
 }
 
-// 8.2 승강기 데이터 단독 판단 (Fallback 전용)
-async function llmElevatorJudgment(elevatorSummary) {
-    const floor = elevatorSummary.maxFloor;
-    const isMulti = floor >= 16;
-    const resultText = isMulti ? "예" : "아니오";
-
-    const prompt = `
-    [상황] 건축물대장이 조회되지 않아 승강기 정보로만 판단해야 함.
-    [데이터] 승강기 정보 기준 최고 층수: ${floor}층.
-    
-    [판단 기준]
-    - 16층 이상이면 다중이용건축물('예').
-    - 16층 미만이면 해당 없음('아니오').
-
-    [지시사항]
-    위 기준으로 판단(예/아니오)하고, "건축물대장이 조회되지 않아 승강기 정보(${floor}층)를 기준으로 판단했다"는 내용을 포함하여 설명해줘.
-
-    [출력 형식]
-    JSON 포맷: {"decision": "예/아니오", "reason": "설명 문장"}
-    `;
-    
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.0,
-            max_tokens: 300,
-        });
-        const content = response.choices[0].message.content.trim();
-        
-        const s = content.indexOf('{');
-        const e = content.lastIndexOf('}');
-        
-        if (s !== -1 && e !== -1) {
-             return JSON.parse(content.substring(s, e + 1));
-        }
-        return { decision: resultText, reason: content };
-
-    } catch (e) {
-        return { 
-            decision: resultText, 
-            reason: `승강기 정보(${floor}층)를 기준으로 ${resultText}로 판단했습니다. (AI 오류)` 
-        };
-    }
-}
 
 // 9. API 핸들러
 async function apiSummaryHandler(req, res) {
@@ -305,44 +262,45 @@ async function apiSummaryHandler(req, res) {
         const addr = req.body.addr;
         if (!addr) return res.status(400).json({ error: "주소 필요" });
 
+        // 1. Juso 검색
         const addressInfo = await searchAddress(addr);
         if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
 
+        // 2. 병렬 조회
         const [molitItems, elevatorResult] = await Promise.all([
             fetchBuildingRegister(addressInfo).catch(() => []),
             searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
         ]);
 
+        // 3. 데이터 요약
         const molitSummary = buildMolitSummary(molitItems);
         const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
         const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
 
-        // Fallback 여부: MOLIT 데이터가 사실상 없을 때
+        // 4. Fallback 여부
         const isFallback = (molitSummary.totalCount === 0) || (molitSummary.maxFloor === 0 && molitSummary.gaMokArea === 0);
         
         if (isFallback && elevatorResult.count === 0) {
              return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
         }
 
-        // 1차: Node.js Rule Engine
+        // 5. 1차 판단 (Node.js)
         const gradeInfo = determineSafetyGrade(molitSummary, elevatorSummary, isFallback);
         
-        // 2차: LLM Judge & Explain
-        const llmResult = await llmJudgment(gradeInfo, molitSummary, elevatorSummary, isFallback);
+        // 6. 2차 판단 (LLM - 강화된 프롬프트)
+        const llmResult = await generateLLMDescription(gradeInfo, molitSummary, elevatorSummary);
 
-        // UI 응답 생성
+        // 7. 응답 생성
         res.json({
-            status: isFallback ? "ok_fallback" : "ok",
+            status: "ok",
             uiRender: {
                 badgeText: gradeInfo.badge,
                 colorTheme: gradeInfo.colorTheme,
                 mainTitle: gradeInfo.title,
-                description: llmResult.reason // LLM이 생성한 설명
+                description: llmResult.reason // LLM이 만든 설명
             },
             analysis: {
-                // 1차 판단 결과 (시스템)
-                ruleBased: (gradeInfo.code === 'RED') ? '다중이용건축물 (특수)' : (gradeInfo.code === 'BLUE' ? '일반건축물 (일반)' : '해당 없음'),
-                // 2차 판단 결과 (AI)
+                ruleBased: (gradeInfo.code === 'RED') ? '다중이용건축물 (특수)' : '일반건축물 (일반)', 
                 llmFinalDecision: llmResult.decision, 
                 llmReason: llmResult.reason
             },
@@ -353,7 +311,11 @@ async function apiSummaryHandler(req, res) {
                 source: isFallback ? "승강기 정보 (FALLBACK)" : "건축물대장 (MOLIT)"
             },
             summaryDetails: {
-                ...molitSummary,
+                // HTML 호환성을 위한 한글 키
+                총건물수: molitSummary.totalCount,
+                최고지상층수: molitSummary.maxFloor,
+                가목_연면적_합계: molitSummary.gaMokArea,
+                가목_대표_용도: molitSummary.gaMokType,
                 elevatorCount: elevatorResult.count,
                 elevatorMaxFloor: elevatorSummary.maxFloor,
                 elevatorSource: bestElevator ? '승강기 정보 있음' : '승강기 정보 없음',
