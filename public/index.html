@@ -5,27 +5,136 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>건축물 안전관리 의무교육 자동 안내</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    </head>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary': '#1E3A8A', 
+                        'secondary': '#60A5FA',
+                        'soft-red': '#FEF2F2',
+                        'deep-red': '#DC2626',
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #F3F4F6; }
+        .json-viewer { 
+            background-color: #F0F4F8; padding: 12px; border-radius: 6px; 
+            max-height: 250px; overflow-y: scroll; white-space: pre-wrap; 
+            word-wrap: break-word; font-family: monospace; font-size: 0.75rem; 
+            border: 1px solid #E5E7EB; margin-top: 10px;
+        }
+    </style>
+</head>
 <body class="p-4 sm:p-8 min-h-screen flex items-start justify-center">
 
-    <div id="resultOutput"></div>
+    <div class="w-full max-w-lg bg-white shadow-2xl rounded-xl p-6 sm:p-8 mt-4 border border-gray-100">
+
+        <header class="text-center mb-6">
+            <h1 class="text-2xl sm:text-3xl font-extrabold text-primary mb-1">
+                스마트 교육 안내 시스템
+            </h1>
+            <p class="text-gray-600 text-sm sm:text-base">
+                건물 주소로 법정 의무교육을 확인하세요.
+            </p>
+        </header>
+
+        <section class="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <label class="block text-md font-semibold text-gray-700 mb-3">
+                건물 주소 입력
+            </label>
+            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                <input type="text" id="addressInput" placeholder="예: 경기도 양주시 회천중앙로 282" 
+                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-sm focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm">
+                <button id="checkButton"
+                        class="px-5 py-3 bg-primary text-white font-bold rounded-lg hover:bg-secondary transition duration-300 shadow-md disabled:opacity-50 text-sm whitespace-nowrap">
+                    확인
+                </button>
+            </div>
+        </section>
+
+        <section class="p-4 border-4 border-dashed border-gray-200 bg-white rounded-xl min-h-[180px]">
+            <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                </svg>
+                조회 결과
+            </h2>
+
+            <div id="loadingIndicator" class="hidden text-center py-8">
+                <div class="animate-spin inline-block w-8 h-8 border-4 border-t-4 border-secondary border-t-transparent rounded-full mb-3"></div>
+                <p class="text-gray-500 text-sm font-medium">데이터 분석 중...</p>
+            </div>
+
+            <div id="errorMessage" class="hidden p-3 bg-soft-red border border-deep-red text-deep-red rounded-lg text-sm font-medium mb-4 flex items-start">
+                <span class="mr-2">❌</span>
+                <span id="errorText"></span>
+            </div>
+
+            <div id="resultOutput" class="space-y-4">
+                <p class="text-gray-400 text-sm italic text-center py-6">주소를 입력하고 확인 버튼을 눌러주세요.</p>
+            </div>
+        </section>
+        
+        <section class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200 text-xs">
+             <h3 class="font-semibold text-primary mb-2">💡 이용 안내</h3>
+             <ul class="list-disc list-inside text-gray-600 space-y-1">
+                 <li>건축물대장과 승강기 정보를 교차 분석하여 안내합니다.</li>
+                 <li>데이터가 일치하지 않을 경우 현장 확인이 필요할 수 있습니다.</li>
+             </ul>
+         </section>
+    </div>
+
     <script>
-        // ... (기본 변수 선언)
+        const BTN = document.getElementById('checkButton');
+        const INPUT = document.getElementById('addressInput');
+        const RESULT = document.getElementById('resultOutput');
+        const ERROR = document.getElementById('errorMessage');
+        const ERR_TEXT = document.getElementById('errorText');
+        const LOADER = document.getElementById('loadingIndicator');
+
+        // JSON 뷰어 토글 함수
+        window.toggleJson = function() {
+            const viewer = document.getElementById('jsonViewer');
+            viewer.classList.toggle('hidden');
+        };
 
         async function search() {
-            // ... (초기화 로직)
+            const addr = INPUT.value.trim();
+            if (!addr) {
+                ERR_TEXT.textContent = "주소를 입력해주세요.";
+                ERROR.classList.remove('hidden');
+                return;
+            }
+
+            BTN.disabled = true;
+            LOADER.classList.remove('hidden');
+            RESULT.classList.add('hidden');
+            ERROR.classList.add('hidden');
+            RESULT.innerHTML = '';
 
             try {
-                const res = await fetch('/api/summary', { /* POST */ });
-                const json = await res.json();
+                const res = await fetch('/api/summary', {
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ addr })
+                });
+                
+                const json = await responseJsonSafe(res);
 
-                if (!res.ok || json.error) throw new Error(json.error || '오류');
+                if (!res.ok || json.error) {
+                    throw new Error(json.detail || json.error || '서버 오류');
+                }
 
-                // 🚨 Server-Driven UI Rendering 🚨
-                // 서버가 준 데이터를 그대로 변수에 할당
+                // 🚨 Server-Driven UI Logic (여기가 핵심!)
+                // 서버가 보내준 uiRender 객체를 사용하여 화면을 구성합니다.
                 const { uiRender, data, raw } = json;
 
-                // 색상 매핑 (서버는 'red'라고만 줌 -> 클라이언트가 스타일 결정)
+                // 색상 테마 매핑
                 const colorMap = {
                     red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600' },
                     blue: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600' },
@@ -34,39 +143,33 @@
                 };
                 const theme = colorMap[uiRender.colorTheme];
 
-                // HTML 생성 (로직 없음, 매핑만 있음)
+                // HTML 렌더링
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
                         <div class="flex justify-between items-start mb-2">
                             <div>
-                                <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">
-                                    ${uiRender.badgeText}
-                                </span>
+                                <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">${uiRender.badgeText}</span>
                                 <p class="text-sm text-gray-700 font-bold leading-tight">${data.address}</p>
                             </div>
                         </div>
                         
                         <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
                             <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
-                            <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
-                                ${uiRender.mainTitle}
-                            </p>
-                            <p class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2 leading-relaxed">
-                                ${uiRender.description}
-                            </p>
+                            <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">${uiRender.mainTitle}</p>
+                            <p class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2 leading-relaxed">${uiRender.description}</p>
                         </div>
 
                         <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-                            <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">📊 정보 확인</h6>
+                            <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">📊 정보 확인 (데이터 비교)</h6>
                             <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                                 <div class="font-bold text-primary border-b pb-1">🏛️ 건축물대장</div>
                                 <div class="font-bold text-primary border-b pb-1">🛗 승강기 정보</div>
                                 
-                                <div class="pt-1 text-gray-600">최고층: <b>${data.molit.floor}F</b></div>
-                                <div class="pt-1 text-gray-600">최고층: <b>${data.elevator.floor}F</b></div>
+                                <div class="pt-1 text-gray-600">최고층: <span class="font-bold text-black">${data.molit.floor}F</span></div>
+                                <div class="pt-1 text-gray-600">최고층: <span class="font-bold text-black">${data.elevator.floor}F</span></div>
                                 
-                                <div class="text-gray-600">가목면적: <b>${data.molit.area}㎡</b></div>
-                                <div class="text-gray-600">승강기수: <b>${data.elevator.count}대</b></div>
+                                <div class="text-gray-600">가목면적: <span class="font-bold text-black">${data.molit.area}㎡</span></div>
+                                <div class="text-gray-600">승강기수: <span class="font-bold text-black">${data.elevator.count}대</span></div>
                                 
                                 <div class="text-gray-400 col-span-2 mt-1 pt-1 border-t text-[10px]">
                                     * 데이터 출처: ${data.source}
@@ -74,18 +177,33 @@
                             </div>
                         </div>
                         
-                         <div class="mt-3 text-right">
-                            <button onclick="toggleJson()" class="text-xs text-gray-400 hover:text-blue-600 underline transition">상세 원본 보기</button>
+                        <div class="mt-3 text-right">
+                            <button onclick="toggleJson()" class="text-xs text-gray-400 hover:text-blue-600 underline transition">
+                                상세 데이터 원본 보기
+                            </button>
                         </div>
-                        <div id="jsonViewer" class="json-viewer hidden mt-2">${JSON.stringify(raw, null, 2)}</div>
+                        <div id="jsonViewer" class="json-viewer hidden">${JSON.stringify(raw, null, 2)}</div>
                     </div>
                 `;
                 RESULT.classList.remove('hidden');
 
-            } catch (e) { /* 에러 처리 */ } 
-            finally { /* 로딩 종료 */ }
+            } catch (e) {
+                ERR_TEXT.textContent = e.message;
+                ERROR.classList.remove('hidden');
+            } finally {
+                LOADER.classList.add('hidden');
+                BTN.disabled = false;
+            }
         }
-        // ...
+
+        async function responseJsonSafe(res) {
+            const text = await res.text();
+            try { return JSON.parse(text); } 
+            catch { return { error: '서버 응답 형식 오류', detail: text.substring(0, 100) }; }
+        }
+
+        BTN.addEventListener('click', search);
+        INPUT.addEventListener('keydown', e => e.key === 'Enter' && search());
     </script>
 </body>
 </html>
