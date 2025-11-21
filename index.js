@@ -3,8 +3,12 @@ const express = require("express");
 const path = require("path");
 require("dotenv").config();
 
-const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+// node-fetch v3
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
+
 const OpenAI = require("openai");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -14,7 +18,7 @@ const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) console.warn("⚠️ 환경변수 확인 필요");
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) console.warn("⚠️ 필수 환경변수 확인 필요");
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
 app.use(express.json());
@@ -40,7 +44,7 @@ async function searchAddress(input) {
   } catch (e) { return null; }
 }
 
-// 5. 데이터 조회
+// 5. 데이터 조회 함수들
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
   const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
   const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
@@ -148,12 +152,16 @@ function buildMolitSummary(items) {
     const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
     const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
 
-    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType?.mainPurpsCdNm || null, items: daJungList };
+    return {
+        totalCount: filtered.length,
+        maxFloor: maxFloor,
+        gaMokArea: gaMokArea,
+        gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null,
+        items: daJungList
+    };
 }
 
-// ============================================================
-// 🚨 7. 안전 등급 결정 (색상 수정: 특수=Blue, 일반=Green)
-// ============================================================
+// 7. 안전 등급 결정 (색상 및 로직)
 function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
@@ -163,85 +171,81 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
 
-    // [비상구출운전 (특수)] -> Blue
+    // [RED] 특수 관리 (12시간)
     if (isGaMok || isNaMok) {
         return {
-            code: 'RED', // 로직용 코드 유지 (RED = 특수)
-            badge: '교육 대상',
-            colorTheme: 'blue', // 🚨 고객 요청: 파란색
+            code: 'RED', badge: '교육 대상', colorTheme: 'blue', // 파란색 (특수)
             title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
-            desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준을 초과하여 다중이용건축물입니다.` : `16층 이상(${finalMaxFloor}층) 건축물이므로 다중이용건축물입니다.`
+            desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준을 초과하여 특수 관리 대상입니다.` : `16층 이상(${finalMaxFloor}층) 건축물이므로 특수 관리 대상입니다.`
         };
     }
-
-    // [일반 관리 (일반)] -> Green
+    // [BLUE] 일반 관리 (4시간)
     if (hasElevatorData || assumedElevator) {
          return {
-            code: 'BLUE', // 로직용 코드 유지 (BLUE = 일반)
-            badge: '교육 대상',
-            colorTheme: 'green', // 🚨 고객 요청: 초록색
+            code: 'BLUE', badge: '교육 대상', colorTheme: 'green', // 초록색 (일반)
             title: '승강기 관리교육(4시간)',
             reason_type: '일반건축물(승강기 보유)',
-            desc_prefix: hasElevatorData 
-                ? '승강기 정보가 확인된 일반건축물입니다.' 
-                : `전산상 승강기 정보는 없으나, ${finalMaxFloor}층 건물이므로 승강기 보유로 간주됩니다.`
+            desc_prefix: hasElevatorData ? '승강기 정보가 확인된 일반건축물입니다.' : `전산상 승강기 정보는 없으나, ${finalMaxFloor}층 건물이므로 승강기 보유로 간주됩니다.`
         };
     }
-
-    // [확인 필요]
+    // [YELLOW/GRAY]
     if (isFallback && finalMaxFloor < 16) {
          return {
-            code: 'YELLOW',
-            badge: '확인 필요',
-            colorTheme: 'yellow',
-            title: '⚠️ 승강기 설치 여부 확인 필요',
-            reason_type: '데이터 불일치',
-            desc_prefix: '건축물대장이 조회되지 않아 정확한 판단이 어렵습니다. 현장 확인이 필요합니다.'
+            code: 'YELLOW', badge: '확인 필요', colorTheme: 'yellow', title: '⚠️ 승강기 설치 여부 확인 필요',
+            reason_type: '데이터 불일치', desc_prefix: '건축물대장이 조회되지 않아 정확한 판단이 어렵습니다. 현장 확인이 필요합니다.'
         };
     }
-
-    // [대상 아님]
     return {
-        code: 'GRAY',
-        badge: '대상 아님',
-        colorTheme: 'gray',
-        title: '교육 의무 없음',
-        reason_type: '대상 아님',
-        desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
+        code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
+        reason_type: '대상 아님', desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
     };
 }
 
-// 8. LLM 설명 생성
+// ============================================================
+// 🚨 8. LLM 설명 생성 (팩트 주입 복구 완료) 🚨
+// ============================================================
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     
+    // 🚨 O/X 팩트 계산
+    const floorCheck = finalFloor >= 16 ? "16층 이상 (조건 충족 O)" : `16층 미만 (${finalFloor}층, 조건 미달 X)`;
+    const areaCheck = area >= 5000 ? "5000㎡ 이상 (조건 충족 O)" : `5000㎡ 미만 (${area}㎡, 조건 미달 X)`;
+    const isElevator = (elevatorSummary.maxFloor > 0 || finalFloor >= 2) ? "보유(또는 간주)" : "미보유";
+    
+    // 🚨 최종 판정 미리 계산
+    let finalDecision = "일반건축물";
+    if (finalFloor >= 16 || area >= 5000) finalDecision = "다중이용건축물";
+    else if (isElevator === "미보유" && finalFloor < 2) finalDecision = "대상아님";
+
     const prompt = `
-    [역할] 건축물 안전관리 판별관.
-    [팩트] 층수: ${finalFloor}층, 면적: ${area}㎡.
-    [시스템 판정] ${gradeInfo.code} (${gradeInfo.reason_type})
-    [기준]
-    - 가목(면적): 5000㎡ 이상.
-    - 나목(층수): 16층 이상.
-    - 16층 미만은 나목 해당 없음.
+    [역할] 건축물 안전관리 판별관 AI
+    [팩트 데이터]
+    1. 층수 기준: ${floorCheck}
+    2. 면적 기준: ${areaCheck}
+    3. 승강기: ${isElevator}
+    4. 시스템 1차 판정: ${finalDecision} (${gradeInfo.code} 등급)
     
-    [지시]
-    위 팩트와 기준을 근거로 최종 판단(예/아니오)과 이유를 설명하세요.
+    [지시사항]
+    위 [팩트 데이터]를 근거로 사용자에게 결과를 설명하는 문장을 작성하세요.
+    - 특수 관리 대상(RED)인 경우: 층수나 면적 중 무엇 때문에 해당되는지 명시.
+    - 일반 관리 대상(BLUE)인 경우: "다중이용건축물 기준에는 미치지 못하나 승강기가 있어 일반 관리교육 대상입니다"라고 설명.
+    - "6층이라 16층 이상입니다" 같은 거짓말 금지.
     
-    [출력] JSON: {"decision": "예/아니오", "reason": "설명 문장"}
+    [출력] JSON 형식: {"decision": "${finalDecision}", "reason": "설명 문장"}
     `;
 
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, max_tokens: 300,
+            temperature: 0.0, max_tokens: 350,
         });
         const content = response.choices[0].message.content.trim();
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
-        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
-        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix };
-    } catch (e) { return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix }; }
+        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1)).message || JSON.parse(content.substring(s, e + 1)).reason;
+        return gradeInfo.desc_prefix; 
+    } catch (e) { return gradeInfo.desc_prefix; }
 }
 
 // 9. API 핸들러
@@ -277,12 +281,13 @@ async function apiSummaryHandler(req, res) {
                 badgeText: gradeInfo.badge,
                 colorTheme: gradeInfo.colorTheme,
                 mainTitle: gradeInfo.title,
-                description: llmResult.reason
+                description: llmResult // LLM 설명
             },
             analysis: {
-                ruleBased: (gradeInfo.code === 'RED') ? '다중이용건축물 (특수)' : '일반건축물 (일반)', 
-                llmFinalDecision: llmResult.decision, 
-                llmReason: llmResult.reason
+                // 🚨 Client 매핑용 코드 변환 (RED -> 다중, BLUE -> 일반)
+                ruleBased: (gradeInfo.code === 'RED') ? 'RED' : (gradeInfo.code === 'BLUE' ? 'BLUE' : 'YELLOW'), 
+                llmFinalDecision: (gradeInfo.code === 'RED') ? '예' : '아니오',
+                llmReason: llmResult
             },
             data: {
                 address: addressInfo.roadAddr,
@@ -304,10 +309,11 @@ async function apiSummaryHandler(req, res) {
         });
 
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
     }
 }
 
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
