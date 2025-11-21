@@ -22,19 +22,11 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #F3F4F6; }
-        /* JSON 뷰어 스타일 */
         .json-viewer { 
-            background-color: #F0F4F8; 
-            padding: 12px; 
-            border-radius: 6px; 
-            max-height: 250px; 
-            overflow-y: scroll; 
-            white-space: pre-wrap; 
-            word-wrap: break-word; 
-            font-family: monospace; 
-            font-size: 0.75rem; 
-            border: 1px solid #E5E7EB; 
-            margin-top: 10px;
+            background-color: #F0F4F8; padding: 12px; border-radius: 6px; 
+            max-height: 250px; overflow-y: scroll; white-space: pre-wrap; 
+            word-wrap: break-word; font-family: monospace; font-size: 0.75rem; 
+            border: 1px solid #E5E7EB; margin-top: 10px;
         }
     </style>
 </head>
@@ -44,9 +36,9 @@
 
         <header class="text-center mb-6">
             <h1 class="text-2xl sm:text-3xl font-extrabold text-primary mb-1">
-                스마트 교육 안내 시스템
+                스마트 교육 안내 시스템 V_3.0   김영선
             </h1>
-            <p class="text-gray-600 text-sm">
+            <p class="text-gray-600 text-sm sm:text-base">
                 건물 주소로 법정 의무교육을 확인하세요.
             </p>
         </header>
@@ -92,7 +84,7 @@
              <h3 class="font-semibold text-primary mb-2">💡 이용 안내</h3>
              <ul class="list-disc list-inside text-gray-600 space-y-1">
                  <li>건축물대장과 승강기 정보를 교차 분석하여 안내합니다.</li>
-                 <li>데이터가 일치하지 않을 경우 현장 확인이 필요할 수 있습니다.</li>
+                 <li>데이터가 일치하지 않을 경우 '확인 필요'로 표시됩니다.</li>
              </ul>
          </section>
     </div>
@@ -105,13 +97,12 @@
         const ERR_TEXT = document.getElementById('errorText');
         const LOADER = document.getElementById('loadingIndicator');
 
-        // 교육 내용 상수 (수정됨)
+        // 🚨 수정된 교육 명칭 상수
         const ED_MULTI = "비상구출운전 승강기관리교육(12시간)";
         const ED_GEN = "승강기 관리교육(4시간)";
-        const ED_CHECK = "⚠️ 승강기 설치 여부 확인 필요 (설치 시 관리교육 4시간 필수)"; // 조건부 문구
+        const ED_CHECK = "⚠️ 상세 확인 필요 (승강기 보유 시 4시간 필수)";
         const ED_NONE = "교육 의무 없음";
 
-        // JSON 뷰어 토글 함수 (전역 스코프)
         window.toggleJson = function() {
             const viewer = document.getElementById('jsonViewer');
             viewer.classList.toggle('hidden');
@@ -125,7 +116,6 @@
                 return;
             }
 
-            // 초기화
             BTN.disabled = true;
             LOADER.classList.remove('hidden');
             RESULT.classList.add('hidden');
@@ -142,12 +132,12 @@
                 const data = await responseJsonSafe(res);
 
                 if (!res.ok || data.error) {
-                    throw new Error(data.detail || data.error || '알 수 없는 서버 오류');
+                    throw new Error(data.detail || data.error || '서버 오류');
                 }
 
                 // --- 데이터 매핑 ---
                 const isMulti = data.analysis.llmFinalDecision === '예';
-                const isFallback = data.status === 'ok_fallback';
+                const isFallback = data.status === 'ok_fallback'; // Case 2: 승강기만 조회됨
                 
                 const molitMaxF = data.summaryDetails.최고지상층수 || 0;
                 const elevMaxF = data.summaryDetails.elevatorMaxFloor || 0;
@@ -155,41 +145,42 @@
                 const area = data.summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
                 const elevCount = data.summaryDetails.elevatorCount || 0;
                 
-                // --- 🚨 교육 판단 로직 (강화됨) ---
+                // --- 🚨 최종 판단 로직 (Case 1/2 분기 반영) ---
                 let edu = ED_NONE;
                 let badge = '대상 아님';
                 let color = 'gray'; 
                 let decisionNote = data.analysis.llmReason;
 
-                if (isMulti) {
-                    // 1. 특수 관리 (다중이용)
+                if (isMulti || finalMaxF >= 16) { 
+                    // 1. [특수 관리] : 16층 이상이거나 다중이용 판정 시 (데이터 출처 불문)
                     edu = ED_MULTI;
                     badge = '특수 관리';
                     color = 'red';
-                    
-                } else if (finalMaxF >= 16) {
-                    // 2. 특수 관리 (16층 이상)
-                    edu = ED_MULTI;
-                    badge = '특수 관리';
-                    color = 'red';
-                    // LLM 이유가 부족할 경우 보충
-                    if(!decisionNote.includes('16층')) decisionNote += " (16층 이상 건축물이므로 비상구출운전 교육이 필요합니다.)";
+                    if (isFallback) decisionNote = "건축물대장이 조회되지 않았으나, 승강기 정보상 16층 이상이므로 특수 관리 교육 대상입니다.";
 
-                } else if (elevCount > 0) { 
-                    // 3. 일반 관리 (승강기 데이터 확실함)
+                } else if (!isFallback && elevCount > 0) { 
+                    // 2. [일반 관리] : Case 1 (대장O) + 승강기O
                     edu = ED_GEN;
                     badge = '일반 관리';
                     color = 'green';
 
-                } else if (finalMaxF >= 2) {
-                    // 4. ⚠️ 확인 필요 (승강기 데이터 없으나 2층 이상임)
+                } else if (isFallback) {
+                    // 3. [확인 필요] : Case 2 (대장X, 승강기O) -> 16층 미만이면 확인 필요
+                    // 건축물대장이 없어서 용도/면적을 모르므로 안전하게 '확인 필요'로 안내
                     edu = ED_CHECK;
                     badge = '확인 필요';
                     color = 'yellow';
-                    decisionNote = `시스템상 승강기 정보가 조회되지 않았으나, ${finalMaxF}층 건물이므로 승강기가 존재할 가능성이 있습니다. 실제 승강기가 있다면 관리교육이 필수입니다.`;
+                    decisionNote = "승강기 정보는 조회되었으나 건축물대장 정보가 없습니다. 실제 승강기가 운행 중이라면 관리교육(4시간) 대상입니다.";
+
+                } else if (finalMaxF >= 2) {
+                    // 4. [확인 필요] : Case 1 (대장O, 승강기0) -> 2층 이상이면 확인 필요
+                    edu = ED_CHECK;
+                    badge = '확인 필요';
+                    color = 'yellow';
+                    decisionNote = `건축물대장상 ${finalMaxF}층 건물이지만 시스템상 승강기가 조회되지 않았습니다. 현장에 승강기가 있다면 교육이 필수입니다.`;
 
                 } else { 
-                    // 5. 의무 없음 (1층 이하)
+                    // 5. [대상 아님] : 1층 이하 + 승강기 데이터 없음
                     edu = ED_NONE;
                     badge = '대상 아님';
                     color = 'gray';
@@ -201,10 +192,6 @@
                 const elevSourceText = data.summaryDetails.elevatorSource || '-';
 
                 // --- UI 렌더링 ---
-                // Tailwind 색상 클래스 동적 할당 (v3.x JIT 모드 호환을 위해 전체 클래스명 사용 권장되나, 여기서는 style로 보완)
-                // *참고: Tailwind JIT는 동적 클래스(bg-${color}-100)를 때때로 놓칠 수 있으므로 안전하게 style 속성 병행하거나 매핑 객체 사용이 좋음.
-                // 여기서는 가독성을 위해 기존 방식 유지하되, 색상별 매핑을 추가합니다.
-
                 const colorMap = {
                     red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600' },
                     green: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600' },
@@ -223,7 +210,7 @@
                         </div>
                         
                         <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
-                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">필수 교육과정</p>
+                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
                             <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">${edu}</p>
                             <p class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2 leading-relaxed">${decisionNote}</p>
                         </div>
