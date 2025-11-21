@@ -224,59 +224,85 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     } catch (e) { return gradeInfo.desc_prefix; }
 }
 
-// 9. API 핸들러
+// ... (이전 코드 1~8번 섹션 동일) ...
+
+// 9. API 핸들러 (최종 통합 - 데이터 호환성 복구)
 async function apiSummaryHandler(req, res) {
     try {
         const addr = req.body.addr;
         if (!addr) return res.status(400).json({ error: "주소 필요" });
 
+        // 1. JUSO 검색
         const addressInfo = await searchAddress(addr);
         if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
 
+        // 2. 병렬 조회
         const [molitItems, elevatorResult] = await Promise.all([
             fetchBuildingRegister(addressInfo).catch(() => []),
             searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
         ]);
 
+        // 3. 데이터 요약
         const molitSummary = buildMolitSummary(molitItems);
         const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
         const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
 
+        // 4. Fallback 여부 판단
         const isFallback = (molitSummary.totalCount === 0) || (molitSummary.maxFloor === 0 && molitSummary.gaMokArea === 0);
         
+        // 5. 유효 데이터 없음
         if (isFallback && elevatorResult.count === 0) {
-             return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
+             return res.status(404).json({
+                error: "건축물 정보 없음",
+                detail: "건축물대장 및 승강기 정보가 모두 조회되지 않았습니다."
+            });
         }
 
+        // 6. 서버 주도 판단
         const gradeInfo = determineSafetyGrade(molitSummary, elevatorSummary, isFallback);
         const llmDescription = await generateLLMDescription(gradeInfo, molitSummary, elevatorSummary);
 
+        // 7. 응답 (HTML 호환성 완벽 지원)
         res.json({
-            status: "ok",
+            status: isFallback ? "ok_fallback" : "ok",
             uiRender: {
                 badgeText: gradeInfo.badge,
                 colorTheme: gradeInfo.colorTheme,
                 mainTitle: gradeInfo.title,
                 description: llmDescription
             },
-            // HTML 로직용 분석 결과
             analysis: {
                 ruleBased: (gradeInfo.code === 'RED') ? 'YES' : 'NO', 
+                llmFinalDecision: (gradeInfo.code === 'RED') ? '예' : '아니오',
+                llmReason: llmDescription
             },
             data: {
                 address: addressInfo.roadAddr,
-                molit: { floor: molitSummary.maxFloor, area: molitSummary.gaMokArea },
-                elevator: { floor: elevatorSummary.maxFloor, count: elevatorResult.count },
                 source: isFallback ? "승강기 정보 (FALLBACK)" : "건축물대장 (MOLIT)"
             },
-            raw: { molit: molitSummary.items, elevator: bestElevator }
+            // 🚨🚨🚨 복구된 summaryDetails (HTML이 이걸 참조함) 🚨🚨🚨
+            summaryDetails: {
+                총건물수: molitSummary.totalCount,
+                최고지상층수: molitSummary.maxFloor,
+                가목_연면적_합계: molitSummary.gaMokArea,
+                가목_대표_용도: molitSummary.gaMokType,
+                
+                elevatorCount: elevatorResult.count,
+                elevatorMaxFloor: elevatorSummary.maxFloor,
+                elevatorSource: bestElevator ? '승강기 정보 반영됨' : '승강기 정보 없음',
+                
+                다중이용건물: molitSummary.items // 원본 보기용
+            },
+            raw: { molit: molitSummary, elevator: elevatorSummary }
         });
 
     } catch (err) {
-        res.status(500).json({ error: "서버 오류" });
+        console.error(err);
+        res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
     }
 }
 
+// 10. 라우팅
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
