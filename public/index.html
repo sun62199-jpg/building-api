@@ -154,7 +154,7 @@
 
                 // 규정 판단 텍스트 및 아이콘 매핑
                 const ruleCode = analysis.ruleBased;
-                const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : (ruleCode === 'BLUE' ? '일반건축물 (일반)' : '확인 필요');
+                const ruleText = ruleCode === 'RED' ? '다중이용건축물' : (ruleCode === 'BLUE' ? '일반건축물' : '확인 필요');
                 const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
                 const aiDecision = analysis.llmFinalDecision || '판단불가';
 
