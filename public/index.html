@@ -23,8 +23,8 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #F3F4F6; }
         .json-viewer { 
-            background-color: #F9FAFB; padding: 12px; border-radius: 6px; 
-            max-height: 200px; overflow-y: auto; white-space: pre-wrap; 
+            background-color: #F0F4F8; padding: 12px; border-radius: 6px; 
+            max-height: 250px; overflow-y: auto; white-space: pre-wrap; 
             word-wrap: break-word; font-family: monospace; font-size: 0.7rem; 
             border: 1px solid #E5E7EB; margin-top: 10px; color: #374151;
         }
@@ -130,9 +130,8 @@
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                const { uiRender, data, raw, analysis } = json;
+                const { uiRender, data, raw, analysis, summaryDetails } = json;
 
-                // 색상 매핑
                 const colorMap = {
                     red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600', ruleBg: 'bg-red-50', ruleText: 'text-red-700' },
                     blue: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' },
@@ -141,14 +140,22 @@
                 };
                 const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
 
-                // 🚨 핵심 수정: 서버가 정한 색상(red)이면 무조건 '다중이용', 아니면 '일반'
-                // 이렇게 하면 상단 제목(비상구출...)과 하단 판단(다중이용)이 100% 일치합니다.
-                const ruleText = uiRender.colorTheme === 'red' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
-                const ruleIcon = uiRender.colorTheme === 'red' ? '🏢' : '🏠';
+                // 🚨 규정 판단 텍스트 매핑 (서버의 RED/BLUE 코드 기반)
+                let ruleText = "일반건축물";
+                let ruleIcon = "🏠";
+                
+                if (analysis.ruleBased === 'RED') { // 다중이용 or 16층 이상
+                    ruleText = "다중이용건축물 (특수)";
+                    ruleIcon = "🏢";
+                } else if (analysis.ruleBased === 'BLUE') {
+                    ruleText = "일반건축물 (승강기 보유)";
+                } else if (analysis.ruleBased === 'YELLOW') {
+                    ruleText = "확인 필요";
+                    ruleIcon = "⚠️";
+                }
 
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
-                        
                         <div class="flex justify-between items-start mb-2">
                             <div>
                                 <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">
@@ -162,6 +169,9 @@
                             <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
                             <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
                                 ${uiRender.mainTitle}
+                            </p>
+                            <p class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2 leading-relaxed">
+                                ${uiRender.description}
                             </p>
                         </div>
 
@@ -189,7 +199,7 @@
                         <div class="space-y-2">
                             <div class="p-3 rounded-lg border border-gray-200 bg-white">
                                 <p class="text-xs font-bold text-gray-600 mb-1 flex items-center">
-                                    🏛️ 건축법 규정 판단
+                                    🏛️ 건축법 규정 판단 (System)
                                 </p>
                                 <p class="text-sm font-bold text-gray-800">
                                     ${ruleIcon} ${ruleText}
@@ -198,10 +208,10 @@
 
                             <div class="p-3 rounded-lg border ${theme.border} ${theme.ruleBg}">
                                 <p class="text-xs font-bold ${theme.ruleText} mb-1 flex items-center">
-                                    🤖 AI 종합 분석
+                                    🤖 AI 종합 분석 (LLM)
                                 </p>
                                 <p class="text-xs text-gray-700 leading-relaxed text-justify">
-                                    ${uiRender.description}
+                                    ${analysis.llmReason}
                                 </p>
                             </div>
                         </div>
@@ -211,7 +221,7 @@
                                 상세 데이터 원본 보기
                             </button>
                         </div>
-                        <div id="jsonViewer" class="json-viewer hidden mt-2">${JSON.stringify(raw, null, 2)}</div>
+                        <div id="jsonViewer" class="json-viewer hidden mt-2">${JSON.stringify(summaryDetails, null, 2)}</div>
                     </div>
                 `;
                 RESULT.classList.remove('hidden');
