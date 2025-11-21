@@ -36,7 +36,7 @@
 
         <header class="text-center mb-6">
             <h1 class="text-2xl sm:text-3xl font-extrabold text-primary mb-1">
-                스마트 교육 안내 시스템
+                스마트 교육 안내 시스템  V3.0   김영선
             </h1>
             <p class="text-gray-600 text-sm sm:text-base">
                 건물 주소로 법정 의무교육을 확인하세요.
@@ -136,64 +136,52 @@
 
                 // --- 데이터 매핑 ---
                 const isMulti = data.analysis.llmFinalDecision === '예';
-                const isFallback = data.status === 'ok_fallback'; // MOLIT 실패, Elevator 성공
-                const isMolitSuccess = data.status === 'ok';      // MOLIT 성공
+                const isFallback = data.status === 'ok_fallback';
                 
                 const molitMaxF = data.summaryDetails.최고지상층수 || 0;
                 const elevMaxF = data.summaryDetails.elevatorMaxFloor || 0;
-                const elevCount = data.summaryDetails.elevatorCount || 0;
-                
-                // 층수: 둘 중 높은 것 채택 (안전 기준)
                 const finalMaxF = Math.max(molitMaxF, elevMaxF);
                 const area = data.summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
-                const finalBuildingCount = data.summaryDetails.총건물수 || 0;
+                const elevCount = data.summaryDetails.elevatorCount || 0;
                 
-                // --- 🚨 최종 판단 로직 (개선됨) ---
+                // --- 🚨 최종 판단 로직 (용어 단순화 적용) ---
                 let edu = ED_NONE;
                 let badge = '대상 아님';
                 let color = 'gray'; 
                 let decisionNote = data.analysis.llmReason;
 
-                // 1. [특수 관리] : 데이터 소스 불문하고 다중이용 판정 또는 16층 이상이면 무조건 특수
+                // 1. [교육 대상] : 16층 이상 or 다중이용 (12시간)
                 if (isMulti || finalMaxF >= 16) { 
                     edu = ED_MULTI;
-                    badge = '특수 관리';
+                    badge = '교육 대상'; // 🚨 변경됨
                     color = 'red';
-                    if (isFallback) decisionNote += " (승강기 데이터 기준 16층 이상이므로 특수 관리 대상입니다.)";
+                    if (isFallback) decisionNote += " (승강기 정보 기준 16층 이상이므로 특수 관리 교육 대상입니다.)";
                 
-                // 2. [일반 관리] : Case 1 (MOLIT 성공)
-                // MOLIT가 조회되었다면, 승강기 API 결과가 0이어도 건물이 2층 이상이면 승강기가 있다고 가정 (안전한 추정)
-                } else if (isMolitSuccess && finalMaxF >= 2) {
+                // 2. [교육 대상] : 승강기 보유 (4시간)
+                } else if (!isFallback && elevCount > 0) { 
                     edu = ED_GEN;
-                    badge = '일반 관리';
-                    color = 'green';
-                    if (elevCount === 0) decisionNote += " (승강기 정보가 조회되지 않았으나, 건축물 층수를 고려하여 승강기 보유로 가정합니다.)";
+                    badge = '교육 대상'; // 🚨 변경됨
+                    color = 'blue'; // 🚨 일반 교육은 파란색으로 변경
 
-                // 3. [일반 관리] : Case 2 (MOLIT 실패) 인데 승강기가 확실히 있는 경우
-                // (단, 16층 미만인 경우만 여기로 옴)
-                } else if (isFallback && elevCount > 0) {
-                     // 🚨 여기가 딜레마 구간: 16층 미만이면 '일반'일 수도 있지만 '가목(면적)'을 모르므로 '확인 필요'가 더 안전함.
-                     // 하지만 고객님 요청은 '확인 필요' 였으므로 아래 4번으로 넘깁니다.
-                     // 만약 '확인 필요'가 맞다면 여기서 처리하지 않고 pass
-                }
+                } else if (isFallback && elevCount > 0) { 
+                    // Case 2에서 승강기 있는 경우 (16층 미만)
+                    edu = ED_GEN;
+                    badge = '교육 대상'; // 🚨 변경됨
+                    color = 'blue';
 
-                // 4. [확인 필요] : Case 2 (MOLIT 실패) + 16층 미만
-                // 건축물대장이 없어서 '가목(면적)' 여부를 확인할 수 없으므로 확인 필요 띄움
-                if (isFallback && finalMaxF < 16) {
+                } else if (finalMaxF >= 2) {
+                    // 3. [확인 필요] : 데이터상 없지만 2층 이상
                     edu = ED_CHECK;
                     badge = '확인 필요';
                     color = 'yellow';
-                    decisionNote = "승강기 정보는 확인되나(16층 미만), 건축물대장 정보가 없어 건물 용도와 연면적(가목 기준)을 확인할 수 없습니다. 현장 확인 후 승강기가 있다면 교육이 필수입니다.";
-                }
-                
-                // 5. [예외 처리]: MOLIT 성공인데 1층 이하 (교육 없음)
-                if (isMolitSuccess && finalMaxF < 2) {
-                     edu = ED_NONE;
-                     badge = '대상 아님';
-                     color = 'gray';
-                     decisionNote = "1층 이하의 건물이므로 승강기 관리 교육 대상이 아닙니다.";
-                }
+                    decisionNote = `건축물대장상 ${finalMaxF}층 건물이지만 시스템상 승강기가 조회되지 않았습니다. 현장에 승강기가 있다면 교육이 필수입니다.`;
 
+                } else { 
+                    // 4. [대상 아님]
+                    edu = ED_NONE;
+                    badge = '대상 아님';
+                    color = 'gray';
+                }
 
                 // --- 데이터 소스 텍스트 ---
                 let rawDataSourceName = isFallback ? '승강기 정보 (FALLBACK)' : '건축물대장 (MOLIT)';
@@ -203,7 +191,7 @@
                 // --- UI 렌더링 ---
                 const colorMap = {
                     red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600' },
-                    green: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600' },
+                    blue: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600' },
                     yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600' },
                     gray: { border: 'border-gray-400', bg: 'bg-gray-200', text: 'text-gray-800', title: 'text-gray-600' }
                 };
