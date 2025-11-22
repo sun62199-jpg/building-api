@@ -204,37 +204,38 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     };
 }
 
-// 8. LLM 설명 생성 (2차: AI 판단 및 설명)
+// 8. LLM 설명 생성 (2차: AI 판단 및 설명 - 문구 강제 제어)
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     const usage = molitSummary.gaMokType || '공동주택/기타';
     
-    // 🚨 Node.js가 계산한 명시적 플래그 (LLM에게 전달)
+    // Node.js가 미리 계산한 논리 플래그 (LLM에게 줄 Fallback 용)
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
     
-    // 최종 판정 미리 계산 (LLM에게 줄 정답)
+    // 🚨 최종 판정 미리 계산 (LLM에게 줄 정답)
     const finalDecision = isGaMok || isNaMok ? "다중이용건축물" : "일반건축물";
 
     const prompt = `
-    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다.
+    [역할] 당신은 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 아래 논리 구조를 엄격히 따르는 것입니다.)
     
     [핵심 데이터]
     1. 최고 층수: ${finalFloor}층
     2. 가목 면적: ${area.toFixed(2)}㎡
     3. 가목 용도: ${usage}
     
-    [판단 순서 (LLM의 임무)]
-    1. **가목 충족 여부:** ${isGaMok ? 'TRUE' : 'FALSE'}
-    2. **나목 충족 여부:** ${isNaMok ? 'TRUE' : 'FALSE'}
+    [판단 기준 및 출력 템플릿]
+    1. **가목 해당 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+    2. **나목 해당 (층수 ≥ 16F):** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    3. **일반 건축물 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
 
-    [지시사항]
-    1. **판단:** '가목 충족' 또는 '나목 충족'이 TRUE이면 '예', 둘 다 FALSE이면 '아니오'로 판단하세요.
-    2. **문구 생성 (최우선 순위):**
-        - **IF 가목 충족 is TRUE:** 다음 템플릿 A 사용: '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
-        - **ELSE IF 나목 충족 is TRUE:** 다음 템플릿 B 사용: '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
-        - **ELSE:** 다음 템플릿 C 사용: '해당 건물은 일반건축물로 해당합니다.'
+    [지시사항 - 템플릿 선택 우선순위]
+    1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
+    2. **문구 생성:** 아래의 **템플릿 선택 우선순위**에 따라 **정확히 해당되는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요.
+        - **최우선 순위:** 가목 해당 (면적 ≥ 5000㎡)
+        - **차선 순위:** 나목 해당 (층수 ≥ 16F)
+        - **최종 순위:** 일반 건축물 (나머지 모든 경우)
     3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "선택된 문구"}
     `;
 
@@ -247,14 +248,11 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
         
-        // 파싱 실패 시, 시스템 룰을 따름
+        // 파싱 실패 시, 시스템 룰을 따르되 오류 메시지 노출
         const resultText = isGaMok || isNaMok ? '예' : '아니오';
         return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
-
     } catch (e) {
-        // API 오류 시 Node.js가 계산한 결과 기반으로 Fallback
-        const resultText = isGaMok || isNaMok ? '예' : '아니오';
-        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
+        return { decision: isGaMok || isNaMok ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
     }
 }
 
@@ -363,5 +361,6 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
