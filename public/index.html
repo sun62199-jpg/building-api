@@ -129,7 +129,6 @@
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // 🚨 Server-Driven Data
                 const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
                     uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
                 };
@@ -140,13 +139,13 @@
                 const elevMaxF = summaryDetails.elevatorMaxFloor || 0;
                 const elevCount = summaryDetails.elevatorCount || 0;
 
-                // 🚨 Color Map (색상 통일 적용)
+                // 🚨 Color Map (최종 통일)
                 const colorMap = {
-                    // RED Logic (특수 관리) -> Visual: BLUE
-                    red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' },
-                    // BLUE Logic (일반 관리) -> Visual: GREEN
+                    // RED Logic (특수 관리) -> Visual: BLUE (요청)
+                    red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
+                    // BLUE Logic (일반 관리) -> Visual: GREEN (요청)
                     blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
-                    // GRAY/YELLOW/NONE -> Visual: GREEN (통일)
+                    // GRAY/YELLOW (Catch-all) -> Visual: GREEN (통일)
                     yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
                     gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' } // 🚨 GREEN으로 통일
                 };
