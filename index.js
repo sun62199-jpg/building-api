@@ -210,29 +210,32 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     const area = molitSummary.gaMokArea || 0;
     const usage = molitSummary.gaMokType || '공동주택/기타';
     
-    // 🚨 LLM에게 판단을 맡기기 위해, 논리적 결과 대신 원시 데이터를 기반으로 프롬프트를 구성
-    
-    // 최종 판정 미리 계산 (LLM에게 줄 정답)
+    // 🚨 LLM에게 전달할 논리적 판단 근거
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
-
-    const prompt = `
-    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다.
     
-    [핵심 데이터]
+    // Node.js는 LLM에게 줄 답의 논리만 준비
+    const prompt = `
+    [역할] 건축법 전문가이자 최종 판단을 내리는 AI입니다.
+    
+    [데이터]
     1. 최고 층수: ${finalFloor}층
     2. 가목 면적: ${area.toFixed(2)}㎡
     3. 가목 용도: ${usage}
-    
-    [판단 기준 및 출력 템플릿]
-    1. **가목 해당 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
-    2. **나목 해당 (층수 ≥ 16F):** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
-    3. **일반 건축물 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
 
-    [지시사항]
-    1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
-    2. **문구 생성:** 위 판단 결과에 따라 **정확히 해당되는 템플릿 문구 하나**를 'reason' 필드에 삽입하세요.
-    3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "완성된 템플릿 문장"}
+    [판단 순서 및 템플릿 선택 지시 (LLM의 임무)]
+    1. **최우선 (가목):** 가목 면적 기준(5,000㎡)을 충족할 경우: **가목 템플릿 A** 선택.
+    2. **차선 (나목):** 가목 기준은 미충족했으나 16층 이상 기준을 충족할 경우: **나목 템플릿 B** 선택.
+    3. **최종 (일반):** 두 기준 모두 미충족할 경우: **일반 템플릿 C** 선택.
+    
+    [출력 템플릿]
+    A. **가목:** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+    B. **나목:** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    C. **일반:** '해당 건물은 일반건축물로 해당합니다.'
+
+    [최종 임무]
+    위 순서와 템플릿을 사용하여 최종 판단(예/아니오)을 내리고, 선택된 템플릿 문구를 그대로 reason에 삽입하세요.
+    JSON Only: {"decision": "예/아니오", "reason": "선택된 템플릿 문구"}
     `;
 
     try {
@@ -244,9 +247,51 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
         
-        // 파싱 실패 시, 시스템의 기본 설명 반환
-        return { decision: isGaMok || isNaMok ? '예' : '아니오', reason: gradeInfo.desc_prefix };
-    } catch (e) { return { decision: isGaMok || isNaMok ? '예' : '아니오', reason: gradeInfo.desc_prefix }; }
+        // 파싱 실패 시, 시스템 룰을 따름
+        const resultText = isGaMok || isNaMok ? '예' : '아니오';
+        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
+
+    } catch (e) {
+        // API 오류 시 Node.js의 1차 판단 결과로 Fallback
+        const resultText = isGaMok || isNaMok ? '예' : '아니오';
+        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
+    }
+}
+
+// 8.2 LLM Elevator Judgment (승강기 데이터 단독 판단)
+async function llmElevatorJudgment(elevatorSummary) {
+    const floor = elevatorSummary.maxFloor;
+    const isMulti = floor >= 16;
+    const resultText = isMulti ? "예" : "아니오";
+
+    const prompt = `
+    [상황] 건축물대장이 조회되지 않아 승강기 정보로만 판단해야 함.
+    [데이터] 최고 층수: ${floor}층.
+    
+    [판단 기준 및 출력 템플릿]
+    1. **나목 충족 (16층 이상):** '해당 건물은 (건축물대장 부재로 승강기 정보 기준) 최고층 ${floor}층이므로 "나"목 항목에 해당합니다.'
+    2. **일반 건축물 (16층 미만):** '건축물대장이 조회되지 않았습니다. 승강기 정보(${floor}층)를 기준으로 일반 건축물로 판단됩니다.'
+
+    [지시사항]
+    16층 이상이면 나목 템플릿을, 미만이면 일반 건축물 템플릿을 선택하여 설명 문장을 작성하시오.
+    
+    [출력 형식]
+    JSON 포맷만 출력: {"decision": "${resultText}", "reason": "설명 문장"}
+    `;
+    
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
+            temperature: 0.0, max_tokens: 300,
+        });
+        const content = response.choices[0].message.content.trim();
+        const s = content.indexOf('{'), e = content.lastIndexOf('}');
+        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
+        
+        return { decision: resultText, reason: "승강기 정보 기반 판단입니다. (대장 미조회)" };
+    } catch (e) {
+        return { decision: resultText, reason: "승강기 정보 기반 판단입니다. (AI 오류)" };
+    }
 }
 
 // 9. API 핸들러
@@ -318,3 +363,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
