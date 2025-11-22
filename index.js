@@ -167,7 +167,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
 
-    // [RED] 특수 관리 (12시간)
+    // [RED] 다중이용건축물 (12시간)
     if (isGaMok || isNaMok) {
         return {
             code: 'RED', badge: '교육 대상', colorTheme: 'blue',
@@ -177,8 +177,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
         };
     }
 
-    // 🚨 [BLUE] 일반 관리 (4시간) - YELLOW/GRAY 통합 🚨
-    // 모든 존재하는 건물을 일반 건축물로 통합하고 교육명을 통일시킴
+    // 🚨 [BLUE] 일반건축물 (4시간) - YELLOW/GRAY 통합 🚨
     if (molitSummary.totalCount > 0 || elevatorSummary.maxFloor > 0) { 
         return {
             code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
@@ -190,7 +189,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
 
     // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠짐)
     return {
-        code: 'BLUE', badge: '일반 건축물', colorTheme: 'gray', // BLUE 코드를 사용하되 UI는 GRAY 테마 사용
+        code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
         title: '승강기 관리교육(4시간)', // 일반 건축물 타이틀 사용
         reason_type: '일반건축물', 
         desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
@@ -317,4 +316,5 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
