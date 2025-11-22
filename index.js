@@ -18,7 +18,7 @@ const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
   console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
 }
 
@@ -125,13 +125,12 @@ function calculateSimilarity(str1, str2) {
     return matches / Math.max(s1.length, s2.length);
 }
 
-// 🚨 max 변수 선언 및 사용이 올바른 Version 9.0 함수 (Line 340 부근)
 function findBestMatchingElevator(targetName, elevatorItems) {
-    let best = null, max = -1; // ✅ max가 local 변수로 선언됨
+    let best = null, max = -1;
     const unique = Array.from(new Map(elevatorItems.map(i => [i.elevatorNo, i])).values());
     for (const item of unique) {
         const score = calculateSimilarity(targetName, item.buldNm);
-        if (score > max) { max = score; best = item; } // 'max' 사용 정상
+        if (score > max) { max = score; best = item; }
     }
     return best;
 }
@@ -157,10 +156,12 @@ function buildMolitSummary(items) {
     const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
     const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
 
-    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
+    return {
+        totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType?.mainPurpsCdNm || null, items: daJungList
+    };
 }
 
-// 7. 안전 등급 결정 (Node.js 1차 판단)
+// 7. 안전 등급 결정 (1차: Node.js)
 function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
@@ -173,7 +174,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     // [RED] 특수 관리 (12시간)
     if (isGaMok || isNaMok) {
         return {
-            code: 'RED', badge: '교육 대상', colorTheme: 'red',
+            code: 'RED', badge: '교육 대상', colorTheme: 'blue',
             title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
             desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준을 초과하여 다중이용건축물입니다.` : `16층 이상(${finalMaxFloor}층) 건축물이므로 다중이용건축물입니다.`
@@ -209,35 +210,35 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
-    
-    // 🚨 LLM에게 전달할 팩트 주입 (계산 결과를 텍스트로 전달)
+    const usage = molitSummary.gaMokType || '공동주택/기타';
+
+    // 🚨 LLM에게 전달할 팩트 주입
     const floorCheck = finalFloor >= 16 ? "16층 이상 (조건 충족 O)" : `16층 미만 (${finalFloor}층, 조건 미달 X)`;
     const areaCheck = area >= 5000 ? "5000㎡ 이상 (조건 충족 O)" : `5000㎡ 미만 (${area}㎡, 조건 미달 X)`;
     const isElevator = (elevatorSummary.maxFloor > 0 || finalFloor >= 2) ? "보유(또는 간주)" : "미보유";
     
     // 최종 판정 미리 계산 (LLM에게 줄 정답)
-    let finalDecision = "일반건축물";
-    if (finalFloor >= 16 || area >= 5000) finalDecision = "다중이용건축물";
-    else if (isElevator === "미보유" && finalFloor < 2) finalDecision = "대상아님";
+    const isGaMok = area >= 5000;
+    const isNaMok = finalFloor >= 16;
+    const finalDecision = isGaMok || isNaMok ? "다중이용건축물" : ((isElevator === "미보유" && finalFloor < 2) ? "대상아님" : "일반건축물");
 
     const prompt = `
-    [역할] 건축물 안전관리 판별관 AI
-    [팩트 데이터]
-    1. 층수 기준: ${floorCheck}
-    2. 면적 기준: ${areaCheck}
-    3. 승강기: ${isElevator}
-    4. 시스템 1차 판정: ${finalDecision} (${gradeInfo.code} 등급)
+    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다.
     
-    [판단 기준]
-    1. 나목(층수): 16층 이상이면 해당.
-    2. 가목(면적): 5,000㎡ 이상이면 해당.
+    [핵심 데이터]
+    1. 최고 층수: ${finalFloor}층
+    2. 가목 면적: ${area.toFixed(2)}㎡
+    3. 가목 용도: ${usage}
     
+    [판단 기준 및 출력 템플릿]
+    1. **가목 해당 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+    2. **나목 해당 (층수 ≥ 16F):** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    3. **일반 건축물 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
+
     [지시사항]
-    위 [팩트 데이터]와 [판단 기준]을 근거로 최종 판단(예/아니오)과 이유를 설명하는 문장을 작성하세요.
-    - 층수/면적 중 무엇 때문에 해당되는지 명시하며, 층수 비교(Max) 로직을 언급하세요.
-    - 주의: 6층은 16층보다 작으므로 해당하지 않음.
-    
-    [출력] JSON 형식: {"decision": "예/아니오", "reason": "설명 문장"}
+    1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
+    2. **문구 생성:** 위 판단 결과에 따라 **정확히 해당되는 템플릿 문구 하나**를 'reason' 필드에 삽입하세요. (LLM이 템플릿 선택 및 변수 삽입)
+    3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "완성된 템플릿 문장"}
     `;
 
     try {
@@ -248,8 +249,14 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         const content = response.choices[0].message.content.trim();
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
-        return { decision: finalDecision === '다중이용건축물' ? '예' : '아니오', reason: gradeInfo.desc_prefix };
-    } catch (e) { return { decision: finalDecision === '다중이용건축물' ? '예' : '아니오', reason: gradeInfo.desc_prefix }; }
+        
+        // 파싱 실패 시, 시스템 룰을 따르되 오류 메시지 노출
+        const resultText = isGaMok || isNaMok ? '예' : '아니오';
+        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
+
+    } catch (e) {
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
+    }
 }
 
 // 9. API 핸들러
@@ -320,4 +327,4 @@ async function apiSummaryHandler(req, res) {
 
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.listen(PORT, () => console.log(`서버 실행 중: http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
