@@ -119,8 +119,7 @@
 
             try {
                 const res = await fetch('/api/summary', {
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ addr })
                 });
                 
@@ -141,24 +140,23 @@
                 const elevMaxF = summaryDetails.elevatorMaxFloor || 0;
                 const elevCount = summaryDetails.elevatorCount || 0;
 
-                // Color Map (Server sends 'blue' for special, 'green' for general)
+                // 🚨 Color Map (색상 통일 적용)
                 const colorMap = {
-                    // 🚨 Special (RED code) is BLUE visual theme
+                    // RED Logic (특수 관리) -> Visual: BLUE
                     red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' },
-                    // 🚨 General (BLUE code) is GREEN visual theme
+                    // BLUE Logic (일반 관리) -> Visual: GREEN
                     blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
+                    // GRAY/YELLOW/NONE -> Visual: GREEN (통일)
                     yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
-                    gray: { border: 'border-gray-400', bg: 'bg-gray-200', text: 'text-gray-800', title: 'text-gray-600', ruleBg: 'bg-gray-100', ruleText: 'text-gray-600' }
+                    gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' } // 🚨 GREEN으로 통일
                 };
                 const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
 
                 // 규정 판단 텍스트 및 아이콘 매핑
-                const ruleCode = analysis.ruleBased;
-                // 🚨 최종 수정: 일반건축물은 초록색(BLUE code)으로, 다중이용은 파란색(RED code)으로 표시
+                const ruleCode = analysis.ruleBased; 
                 const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
                 const ruleIcon = ruleCode === 'RED' ? '🏢' : '🏠';
                 const aiDecision = analysis.llmFinalDecision || '판단불가';
-
 
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
@@ -195,7 +193,7 @@
                                 <div class="pt-1 text-gray-700">최고층: <b>${elevMaxF}F</b></div>
                                 
                                 <div class="text-gray-700">가목면적: <b>${totalAreaSum}㎡</b></div>
-                                <div class="text-gray-700">보유대수: <b>${elevCount}대</b></div>
+                                <div class="pt-1 text-gray-700">보유대수: <b>${elevCount}대</b></div>
                                 
                                 <div class="text-gray-400 col-span-2 mt-1 pt-1 border-t border-gray-200 text-[10px]">
                                     * 데이터 출처: ${data.source}
