@@ -130,8 +130,7 @@
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // 🚨🚨🚨 CRITICAL FIX: Destructuring & Variable Safety 🚨🚨🚨
-                // 서버가 보내주는 모든 객체를 안전하게 초기화합니다.
+                // 🚨 Server-Driven Data
                 const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
                     uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
                 };
@@ -141,12 +140,13 @@
                 const totalAreaSum = summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
                 const elevMaxF = summaryDetails.elevatorMaxFloor || 0;
                 const elevCount = summaryDetails.elevatorCount || 0;
-                const finalMaxF = Math.max(molitMaxF, elevMaxF); // 최종 층수 (안전 확인용)
 
-                // Server-Driven UI Logic
+                // Color Map (Server sends 'blue' for special, 'green' for general)
                 const colorMap = {
-                    red: { border: 'border-red-500', bg: 'bg-red-100', text: 'text-red-800', title: 'text-red-600', ruleBg: 'bg-red-50', ruleText: 'text-red-700' },
-                    blue: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' },
+                    // 🚨 Special (RED code) is BLUE visual theme
+                    red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' },
+                    // 🚨 General (BLUE code) is GREEN visual theme
+                    blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
                     yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
                     gray: { border: 'border-gray-400', bg: 'bg-gray-200', text: 'text-gray-800', title: 'text-gray-600', ruleBg: 'bg-gray-100', ruleText: 'text-gray-600' }
                 };
@@ -154,9 +154,11 @@
 
                 // 규정 판단 텍스트 및 아이콘 매핑
                 const ruleCode = analysis.ruleBased;
-                const ruleText = ruleCode === 'RED' ? '다중이용건축물' : (ruleCode === 'BLUE' ? '일반건축물' : '확인 필요');
-                const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
+                // 🚨 최종 수정: 일반건축물은 초록색(BLUE code)으로, 다중이용은 파란색(RED code)으로 표시
+                const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
+                const ruleIcon = ruleCode === 'RED' ? '🏢' : '🏠';
                 const aiDecision = analysis.llmFinalDecision || '판단불가';
+
 
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
@@ -187,7 +189,7 @@
                             </h6>
                             <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                                 <div class="font-bold text-primary border-b border-gray-300 pb-1">🏛️ 건축물대장</div>
-                                <div class="font-bold text-primary border-b pb-1">🛗 승강기 정보</div>
+                                <div class="font-bold text-primary border-b border-gray-300 pb-1">🛗 승강기 정보</div>
                                 
                                 <div class="pt-1 text-gray-700">최고층: <b>${molitMaxF}F</b></div>
                                 <div class="pt-1 text-gray-700">최고층: <b>${elevMaxF}F</b></div>
