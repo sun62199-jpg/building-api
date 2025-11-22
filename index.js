@@ -245,3 +245,74 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
     }
 }
+
+// 9. API 핸들러
+async function apiSummaryHandler(req, res) {
+    try {
+        const addr = req.body.addr;
+        if (!addr) return res.status(400).json({ error: "주소 필요" });
+
+        const addressInfo = await searchAddress(addr);
+        if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
+
+        const [molitItems, elevatorResult] = await Promise.all([
+            fetchBuildingRegister(addressInfo).catch(() => []),
+            searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
+        ]);
+
+        const molitSummary = buildMolitSummary(molitItems);
+        const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
+        const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
+
+        const isFallback = (molitSummary.totalCount === 0) || (molitSummary.maxFloor === 0 && molitSummary.gaMokArea === 0);
+        
+        if (isFallback && elevatorResult.count === 0) {
+             return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
+        }
+
+        const gradeInfo = determineSafetyGrade(molitSummary, elevatorSummary, isFallback);
+        const llmResult = await generateLLMDescription(gradeInfo, molitSummary, elevatorSummary);
+
+        res.json({
+            status: "ok",
+            uiRender: {
+                badgeText: gradeInfo.badge,
+                colorTheme: gradeInfo.colorTheme,
+                mainTitle: gradeInfo.title,
+                description: llmResult.reason
+            },
+            addressInfo: { roadAddr: addressInfo.roadAddr, jibun: addressInfo.jibun },
+            analysis: {
+                ruleBased: gradeInfo.code,
+                llmFinalDecision: llmResult.decision, 
+                llmReason: llmResult.reason
+            },
+            data: {
+                address: addressInfo.roadAddr,
+                molit: { floor: molitSummary.maxFloor, area: molitSummary.gaMokArea },
+                elevator: { floor: elevatorSummary.maxFloor, count: elevatorResult.count },
+                source: isFallback ? "승강기 정보 (FALLBACK)" : "건축물대장 (MOLIT)"
+            },
+            summaryDetails: {
+                총건물수: molitSummary.totalCount,
+                최고지상층수: molitSummary.maxFloor,
+                가목_연면적_합계: molitSummary.gaMokArea,
+                가목_대표_용도: molitSummary.gaMokType,
+                elevatorCount: elevatorResult.count,
+                elevatorMaxFloor: elevatorSummary.maxFloor,
+                elevatorSource: bestElevator ? '승강기 정보 있음' : '승강기 정보 없음',
+                daJungList: molitSummary.items
+            },
+            raw: { molit: molitSummary.items, elevator: bestElevator }
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
+    }
+}
+
+app.post("/api/summary", apiSummaryHandler);
+app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
