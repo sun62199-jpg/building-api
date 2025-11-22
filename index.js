@@ -179,33 +179,36 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
         };
     }
 
-    // [BLUE] 일반 관리 (4시간)
-    if (hasElevatorData || assumedElevator) {
+    // 🚨 [BLUE] 일반 관리 (4시간) - YELLOW/GRAY 통합 🚨
+    // (모든 존재하는 건물은 일반건축물로 분류됨)
+    if (molitSummary.totalCount > 0 || elevatorSummary.maxFloor > 0) { 
          return {
             code: 'BLUE', badge: '교육 대상', colorTheme: 'green',
             title: '승강기 관리교육(4시간)',
-            reason_type: '일반건축물(승강기 보유)',
-            desc_prefix: hasElevatorData ? '승강기 정보가 확인된 일반건축물입니다.' : `전산상 승강기 정보는 없으나, ${finalMaxFloor}층 건물이므로 승강기 보유로 간주됩니다.`
+            reason_type: '일반건축물',
+            desc_prefix: '해당 건물은 일반건축물로 해당합니다.' // LLM에게 전적으로 맡기기 위해 심플한 텍스트만 보냄
         };
     }
 
-    // [GRAY] 대상 아님 (강제 통합)
+    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠짐)
     return {
         code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
-        reason_type: '대상 아님', desc_prefix: '1층 이하의 건물이거나 승강기 정보가 없어 교육 대상이 아닙니다.'
+        reason_type: '대상 아님', desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
     };
 }
 
-// 8.1 LLM 설명 생성 (2차: AI 판단 및 설명)
+// 8. LLM 설명 생성 (2차: AI 판단 및 설명)
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     const usage = molitSummary.gaMokType || '공동주택/기타';
     
-    // 🚨 Node.js가 계산한 논리 플래그를 LLM에게 전달
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
     
+    // 최종 판정 미리 계산 (LLM에게 줄 정답)
+    const finalDecision = isGaMok || isNaMok ? "다중이용건축물" : "일반건축물";
+
     const prompt = `
     [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 아래 논리 구조를 엄격히 따르는 것입니다.)
     
@@ -215,8 +218,10 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     3. 가목 용도: ${usage}
     
     [판단 기준 및 출력 템플릿]
+    - **법적 기준**: 가목은 용도가 '특정 용도'이며 연면적 5,000㎡ 이상, 나목은 용도상관없이 16층 이상.
+
     1. **가목 템플릿 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
-    2. **나목 템플릿 (층수 ≥ 16F):** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    2. **나목 템플릿 (층수 ≥ 16F):** '해당 건물은 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
     3. **일반 템플릿 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
 
     [지시사항 - 템플릿 선택 우선순위]
@@ -224,7 +229,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
          - **최우선 순위:** 가목 해당 (면적 ≥ 5000㎡)
          - **차선 순위:** 나목 해당 (층수 ≥ 16F)
          - **최종 순위:** 일반 건축물 (나머지 모든 경우)
-    2. **문구 생성:** 위 판단 결과에 따라 **정확히 해당되는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
+    2. **문구 생성:** 위 우선순위에 따라 **정확히 해당되는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
     3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "선택된 문구"}
     `;
 
@@ -242,42 +247,6 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         return { decision: isMulti ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
     } catch (e) {
         return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
-    }
-}
-
-// 8.2 LLM Elevator Judgment (승강기 데이터 단독 판단)
-async function llmElevatorJudgment(elevatorSummary) {
-    const floor = elevatorSummary.maxFloor;
-    const isMulti = floor >= 16;
-    const resultText = isMulti ? "예" : "아니오";
-
-    const prompt = `
-    [상황] 건축물대장이 조회되지 않아 승강기 정보로만 판단해야 함.
-    [데이터] 최고 층수: ${floor}층.
-    
-    [판단 기준 및 출력 템플릿]
-    1. **나목 충족 (16층 이상):** '해당 건물은 (건축물대장 부재로 승강기 정보 기준) 최고층 ${floor}층이므로 "나"목 항목에 해당합니다.'
-    2. **일반 건축물 (16층 미만):** '건축물대장이 조회되지 않았습니다. 승강기 정보(${floor}층)를 기준으로 일반 건축물로 판단됩니다.'
-
-    [지시사항]
-    16층 이상이면 나목 템플릿을, 미만이면 일반 건축물 템플릿을 선택하여 설명 문장을 작성하시오.
-    
-    [출력 형식]
-    JSON 포맷만 출력: {"decision": "${resultText}", "reason": "설명 문장"}
-    `;
-    
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, max_tokens: 300,
-        });
-        const content = response.choices[0].message.content.trim();
-        const s = content.indexOf('{'), e = content.lastIndexOf('}');
-        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
-        
-        return { decision: resultText, reason: "승강기 정보 기반 판단입니다. (대장 미조회)" };
-    } catch (e) {
-        return { decision: resultText, reason: "승강기 정보 기반 판단입니다. (AI 오류)" };
     }
 }
 
