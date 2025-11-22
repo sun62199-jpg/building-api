@@ -163,9 +163,6 @@ function buildMolitSummary(items) {
 function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
-    const hasElevatorData = elevatorSummary.maxFloor > 0;
-    const assumedElevator = (molitSummary.totalCount > 0 && finalMaxFloor >= 2);
-    
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
 
@@ -175,27 +172,28 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
             code: 'RED', badge: '교육 대상', colorTheme: 'blue',
             title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
-            // 🚨 최종 문구는 Node.js가 결정 (LLM 오류 방지)
             desc_prefix: isGaMok ? `해당 건물은 ${molitSummary.gaMokType || '공동주택/기타'}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.` : `해당 건물은 일반건축물 용도이지만 최고층 ${finalMaxFloor}층이므로 "나"목 항목에 해당합니다.`
         };
     }
 
-    // [BLUE] 일반 관리 (4시간)
+    // 🚨 [BLUE] 일반 관리 (4시간) - YELLOW/GRAY 통합 🚨
+    // RED가 아니며, 데이터가 있다면 무조건 일반 건축물로 분류 (가장 넓은 범주)
     if (molitSummary.totalCount > 0 || elevatorSummary.maxFloor > 0) { 
-        const isEducationNeeded = finalMaxFloor >= 2;
-        
+        // 🚨 Note: 1층 건물도 이리로 와서 '일반 건축물'로 통일됨.
         return {
-            code: 'BLUE', badge: isEducationNeeded ? '교육 대상' : '대상 아님', colorTheme: 'green', 
-            title: isEducationNeeded ? '승강기 관리교육(4시간)' : '교육 의무 없음',
+            code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
+            title: '승강기 관리교육(4시간)', // 교육 필요 유무와 상관없이 상징적인 교육명 사용
             reason_type: '일반건축물',
             desc_prefix: '해당 건물은 일반건축물로 해당합니다.' 
         };
     }
 
-    // [GRAY] 대상 아님 (최종 캐치-올)
+    // [GRAY] 대상 아님 (최종 캐치-올, UI에도 일반 건축물로 표시됨)
     return {
-        code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
-        reason_type: '대상 아님', desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
+        code: 'GRAY', badge: '일반 건축물', colorTheme: 'gray', 
+        title: '법정 교육 의무 없음', // 데이터 부재 시는 교육 의무 없음을 알림
+        reason_type: '대상 아님', 
+        desc_prefix: '해당 건물은 일반건축물로 해당합니다.' 
     };
 }
 
@@ -210,25 +208,27 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     
     // 최종 판정 미리 계산 (LLM에게 줄 정답)
     const finalDecision = isGaMok || isNaMok ? "예" : "아니오";
-    const templateText = gradeInfo.desc_prefix; // Node.js가 이미 최종 문구를 확정
 
     const prompt = `
-    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 논리 구조를 엄격히 따르는 것입니다.)
+    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 아래 논리 구조를 엄격히 따르는 것입니다.)
     
     [핵심 데이터]
     1. 최고 층수: ${finalFloor}층
     2. 가목 면적: ${area.toFixed(2)}㎡
     3. 가목 용도: ${usage}
     
-    [지시사항]
-    1. **판단:** 'decision' 필드에 '${finalDecision}'를 확정하세요.
-    2. **문구 생성:** 아래 [결정된 법적 템플릿]의 내용을 확인하고 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
-    
-    [결정된 법적 템플릿]
-    "${templateText}"
-    
-    [출력 형식]
-    JSON Only: {"decision": "${finalDecision}", "reason": "템플릿 문구"}
+    [판단 기준 및 출력 템플릿]
+    1. **가목 템플릿 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+    2. **나목 템플릿 (층수 ≥ 16F):** '해당 건물은 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    3. **일반 템플릿 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
+
+    [지시사항 - 템플릿 선택 우선순위]
+    1. **판단:** 아래 우선순위에 따라 최종 판단('예'/'아니오')을 내리세요.
+         - **최우선 순위:** 가목 해당 (면적 ≥ 5000㎡)
+         - **차선 순위:** 나목 해당 (층수 ≥ 16F)
+         - **최종 순위:** 일반 건축물 (나머지 모든 경우)
+    2. **문구 생성:** 위 우선순위에 따라 **정확히 해당되는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
+    3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "선택된 문구"}
     `;
 
     try {
@@ -241,9 +241,10 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
         
         // 파싱 실패 시, 시스템의 기본 설명 반환
-        return { decision: finalDecision, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
+        const isMulti = isGaMok || isNaMok;
+        return { decision: isMulti ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
     } catch (e) {
-        return { decision: finalDecision, reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
     }
 }
 
