@@ -163,16 +163,17 @@ function buildMolitSummary(items) {
 function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
+    
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
-    
+
     // [RED] 특수 관리 (12시간)
     if (isGaMok || isNaMok) {
         return {
             code: 'RED', badge: '교육 대상', colorTheme: 'blue',
             title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
-            desc_prefix: isGaMok ? `해당 건물은 ${molitSummary.gaMokType || '공동주택/기타'}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.` : `해당 건물은 최고층 ${finalMaxFloor}층이므로 "나"목 항목에 해당합니다.`
+            desc_prefix: isGaMok ? `해당 건물은 ${molitSummary.gaMokType || '공동주택/기타'}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.` : `해당 건물은 일반건축물 용도이지만 최고층 ${finalMaxFloor}층이므로 "나"목 항목에 해당합니다.`
         };
     }
 
@@ -181,17 +182,17 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     if (molitSummary.totalCount > 0 || elevatorSummary.maxFloor > 0) { 
         return {
             code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
-            title: '승강기 관리교육(4시간)', // 모든 비특수 건물은 이 교육을 받는 것으로 상징
+            title: '승강기 관리교육(4시간)', // 통일된 교육명
             reason_type: '일반건축물',
             desc_prefix: '해당 건물은 일반건축물로 해당합니다.' 
         };
     }
 
-    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠지므로, 이 코드는 거의 실행 안됨)
+    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠짐)
     return {
-        code: 'BLUE', badge: '일반 건축물', colorTheme: 'gray', 
-        title: '법정 교육 의무 없음', // 데이터 부재 시는 교육 의무 없음을 알림
-        reason_type: '대상 아님', 
+        code: 'BLUE', badge: '일반 건축물', colorTheme: 'gray', // BLUE 코드를 사용하되 UI는 GRAY 테마 사용
+        title: '승강기 관리교육(4시간)', // 일반 건축물 타이틀 사용
+        reason_type: '일반건축물', 
         desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
     };
 }
@@ -316,3 +317,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
