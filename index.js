@@ -180,17 +180,18 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     }
 
     // 🚨 [BLUE] 일반 관리 (4시간) - YELLOW/GRAY 통합 🚨
-    // (모든 존재하는 건물은 일반건축물로 분류됨)
     if (molitSummary.totalCount > 0 || elevatorSummary.maxFloor > 0) { 
-         return {
-            code: 'BLUE', badge: '교육 대상', colorTheme: 'green',
-            title: '승강기 관리교육(4시간)',
+        const isEducationNeeded = finalMaxFloor >= 2;
+        
+        return {
+            code: 'BLUE', badge: isEducationNeeded ? '교육 대상' : '대상 아님', colorTheme: 'green', // 초록색 (일반)
+            title: isEducationNeeded ? '승강기 관리교육(4시간)' : '교육 의무 없음',
             reason_type: '일반건축물',
-            desc_prefix: '해당 건물은 일반건축물로 해당합니다.' // LLM에게 전적으로 맡기기 위해 심플한 텍스트만 보냄
+            desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
         };
     }
 
-    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠짐)
+    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠지므로, 여기는 불필요하지만 안전장치로 유지)
     return {
         code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
         reason_type: '대상 아님', desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
@@ -204,10 +205,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     const usage = molitSummary.gaMokType || '공동주택/기타';
     
     const isGaMok = area >= 5000;
-    const isNaMok = finalFloor >= 16;
-    
-    // 최종 판정 미리 계산 (LLM에게 줄 정답)
-    const finalDecision = isGaMok || isNaMok ? "다중이용건축물" : "일반건축물";
+    const isNaMok = finalMaxFloor >= 16;
 
     const prompt = `
     [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 아래 논리 구조를 엄격히 따르는 것입니다.)
@@ -218,8 +216,6 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     3. 가목 용도: ${usage}
     
     [판단 기준 및 출력 템플릿]
-    - **법적 기준**: 가목은 용도가 '특정 용도'이며 연면적 5,000㎡ 이상, 나목은 용도상관없이 16층 이상.
-
     1. **가목 템플릿 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
     2. **나목 템플릿 (층수 ≥ 16F):** '해당 건물은 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
     3. **일반 템플릿 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
@@ -249,73 +245,3 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
     }
 }
-
-// 9. API 핸들러
-async function apiSummaryHandler(req, res) {
-    try {
-        const addr = req.body.addr;
-        if (!addr) return res.status(400).json({ error: "주소 필요" });
-
-        const addressInfo = await searchAddress(addr);
-        if (!addressInfo) return res.status(404).json({ error: "주소 검색 실패" });
-
-        const [molitItems, elevatorResult] = await Promise.all([
-            fetchBuildingRegister(addressInfo).catch(() => []),
-            searchElevatorWithFallbackNames(addressInfo).catch(() => ({ count: 0, items: [] }))
-        ]);
-
-        const molitSummary = buildMolitSummary(molitItems);
-        const bestElevator = findBestMatchingElevator(addressInfo.buldNm, elevatorResult.items);
-        const elevatorSummary = getElevatorSummary(bestElevator ? [bestElevator] : []);
-
-        const isFallback = (molitSummary.totalCount === 0) || (molitSummary.maxFloor === 0 && molitSummary.gaMokArea === 0);
-        
-        if (isFallback && elevatorResult.count === 0) {
-             return res.status(404).json({ error: "건축물 정보 없음", detail: "데이터 조회 실패" });
-        }
-
-        const gradeInfo = determineSafetyGrade(molitSummary, elevatorSummary, isFallback);
-        const llmResult = await generateLLMDescription(gradeInfo, molitSummary, elevatorSummary);
-
-        res.json({
-            status: "ok",
-            uiRender: {
-                badgeText: gradeInfo.badge,
-                colorTheme: gradeInfo.colorTheme,
-                mainTitle: gradeInfo.title,
-                description: llmResult.reason
-            },
-            addressInfo: { roadAddr: addressInfo.roadAddr, jibun: addressInfo.jibun },
-            analysis: {
-                ruleBased: gradeInfo.code,
-                llmFinalDecision: llmResult.decision, 
-                llmReason: llmResult.reason
-            },
-            data: {
-                address: addressInfo.roadAddr,
-                molit: { floor: molitSummary.maxFloor, area: molitSummary.gaMokArea },
-                elevator: { floor: elevatorSummary.maxFloor, count: elevatorResult.count },
-                source: isFallback ? "승강기 정보 (FALLBACK)" : "건축물대장 (MOLIT)"
-            },
-            summaryDetails: {
-                총건물수: molitSummary.totalCount,
-                최고지상층수: molitSummary.maxFloor,
-                가목_연면적_합계: molitSummary.gaMokArea,
-                가목_대표_용도: molitSummary.gaMokType,
-                elevatorCount: elevatorResult.count,
-                elevatorMaxFloor: elevatorSummary.maxFloor,
-                elevatorSource: bestElevator ? '승강기 정보 있음' : '승강기 정보 없음',
-                daJungList: molitSummary.items
-            },
-            raw: { molit: molitSummary.items, elevator: bestElevator }
-        });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
-    }
-}
-
-app.post("/api/summary", apiSummaryHandler);
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
