@@ -210,32 +210,32 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     const area = molitSummary.gaMokArea || 0;
     const usage = molitSummary.gaMokType || '공동주택/기타';
     
-    // 🚨 LLM에게 전달할 논리적 판단 근거
+    // 🚨 Node.js가 계산한 명시적 플래그 (LLM에게 전달)
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
     
-    // Node.js는 LLM에게 줄 답의 논리만 준비
+    // 최종 판정 미리 계산 (LLM에게 줄 정답)
+    const finalDecision = isGaMok || isNaMok ? "다중이용건축물" : "일반건축물";
+
     const prompt = `
-    [역할] 건축법 전문가이자 최종 판단을 내리는 AI입니다.
+    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다.
     
-    [데이터]
+    [핵심 데이터]
     1. 최고 층수: ${finalFloor}층
     2. 가목 면적: ${area.toFixed(2)}㎡
     3. 가목 용도: ${usage}
-
-    [판단 순서 및 템플릿 선택 지시 (LLM의 임무)]
-    1. **최우선 (가목):** 가목 면적 기준(5,000㎡)을 충족할 경우: **가목 템플릿 A** 선택.
-    2. **차선 (나목):** 가목 기준은 미충족했으나 16층 이상 기준을 충족할 경우: **나목 템플릿 B** 선택.
-    3. **최종 (일반):** 두 기준 모두 미충족할 경우: **일반 템플릿 C** 선택.
     
-    [출력 템플릿]
-    A. **가목:** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
-    B. **나목:** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
-    C. **일반:** '해당 건물은 일반건축물로 해당합니다.'
+    [판단 순서 (LLM의 임무)]
+    1. **가목 충족 여부:** ${isGaMok ? 'TRUE' : 'FALSE'}
+    2. **나목 충족 여부:** ${isNaMok ? 'TRUE' : 'FALSE'}
 
-    [최종 임무]
-    위 순서와 템플릿을 사용하여 최종 판단(예/아니오)을 내리고, 선택된 템플릿 문구를 그대로 reason에 삽입하세요.
-    JSON Only: {"decision": "예/아니오", "reason": "선택된 템플릿 문구"}
+    [지시사항]
+    1. **판단:** '가목 충족' 또는 '나목 충족'이 TRUE이면 '예', 둘 다 FALSE이면 '아니오'로 판단하세요.
+    2. **문구 생성 (최우선 순위):**
+        - **IF 가목 충족 is TRUE:** 다음 템플릿 A 사용: '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+        - **ELSE IF 나목 충족 is TRUE:** 다음 템플릿 B 사용: '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+        - **ELSE:** 다음 템플릿 C 사용: '해당 건물은 일반건축물로 해당합니다.'
+    3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "선택된 문구"}
     `;
 
     try {
@@ -252,7 +252,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
 
     } catch (e) {
-        // API 오류 시 Node.js의 1차 판단 결과로 Fallback
+        // API 오류 시 Node.js가 계산한 결과 기반으로 Fallback
         const resultText = isGaMok || isNaMok ? '예' : '아니오';
         return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
     }
@@ -363,4 +363,5 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
