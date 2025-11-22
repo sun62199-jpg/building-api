@@ -250,6 +250,39 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     }
 }
 
+// 8.2 LLM Elevator Judgment (승강기 데이터 단독 판단)
+async function llmElevatorJudgment(elevatorSummary) {
+    const floor = elevatorSummary.maxFloor;
+    const isMulti = floor >= 16;
+    const resultText = isMulti ? "예" : "아니오";
+    const prompt = `
+
+    [상황] 건축물대장이 조회되지 않아 승강기 정보로만 판단해야 함.
+
+    [데이터] 최고 층수: ${floor}층.
+
+    
+
+    [판단 기준 및 출력 템플릿]
+
+    1. **나목 충족 (16층 이상):** '해당 건물은 (건축물대장 부재로 승강기 정보 기준) 최고층 ${floor}층이므로 "나"목 항목에 해당합니다.'
+
+    2. **일반 건축물 (16층 미만):** '건축물대장이 조회되지 않았습니다. 승강기 정보(${floor}층)를 기준으로 일반 건축물로 판단됩니다.'
+
+
+
+    [지시사항]
+
+    16층 이상이면 나목 템플릿을, 미만이면 일반 건축물 템플릿을 선택하여 설명 문장을 작성하시오.
+
+    
+
+    [출력 형식]
+
+    JSON 포맷만 출력: {"decision": "${resultText}", "reason": "설명 문장"}
+
+    `;
+
 // 9. API 핸들러
 async function apiSummaryHandler(req, res) {
     try {
