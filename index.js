@@ -18,7 +18,7 @@ const MOLIT_KEY = process.env.MOLIT_KEY;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY) {
   console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
 }
 
@@ -97,7 +97,7 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     try {
         const res = await fetch(url.toString());
         const text = await res.text();
-        if (!res.ok) return { count: 0, items: [] };
+        if (!res.ok) return [];
         let data; try { data = JSON.parse(text); } catch { return { count: 0, items: [] }; }
         if (data.response?.header?.resultCode !== "00") return { count: 0, items: [] };
         const count = Number(data.response?.body?.totalCount) || 0;
@@ -156,9 +156,7 @@ function buildMolitSummary(items) {
     const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
     const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
 
-    return {
-        totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType?.mainPurpsCdNm || null, items: daJungList
-    };
+    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
 }
 
 // 7. 안전 등급 결정 (1차: Node.js)
@@ -174,7 +172,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     // [RED] 특수 관리 (12시간)
     if (isGaMok || isNaMok) {
         return {
-            code: 'RED', badge: '교육 대상', colorTheme: 'blue',
+            code: 'RED', badge: '교육 대상', colorTheme: 'red',
             title: '비상구출운전 승강기관리교육(12시간)',
             reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
             desc_prefix: isGaMok ? `가목 용도 면적(${gaMokArea.toFixed(2)}㎡) 기준을 초과하여 다중이용건축물입니다.` : `16층 이상(${finalMaxFloor}층) 건축물이므로 다중이용건축물입니다.`
@@ -211,16 +209,12 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     const usage = molitSummary.gaMokType || '공동주택/기타';
-
-    // 🚨 LLM에게 전달할 팩트 주입
-    const floorCheck = finalFloor >= 16 ? "16층 이상 (조건 충족 O)" : `16층 미만 (${finalFloor}층, 조건 미달 X)`;
-    const areaCheck = area >= 5000 ? "5000㎡ 이상 (조건 충족 O)" : `5000㎡ 미만 (${area}㎡, 조건 미달 X)`;
-    const isElevator = (elevatorSummary.maxFloor > 0 || finalFloor >= 2) ? "보유(또는 간주)" : "미보유";
+    
+    // 🚨 LLM에게 판단을 맡기기 위해, 논리적 결과 대신 원시 데이터를 기반으로 프롬프트를 구성
     
     // 최종 판정 미리 계산 (LLM에게 줄 정답)
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
-    const finalDecision = isGaMok || isNaMok ? "다중이용건축물" : ((isElevator === "미보유" && finalFloor < 2) ? "대상아님" : "일반건축물");
 
     const prompt = `
     [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다.
@@ -237,7 +231,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
 
     [지시사항]
     1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
-    2. **문구 생성:** 위 판단 결과에 따라 **정확히 해당되는 템플릿 문구 하나**를 'reason' 필드에 삽입하세요. (LLM이 템플릿 선택 및 변수 삽입)
+    2. **문구 생성:** 위 판단 결과에 따라 **정확히 해당되는 템플릿 문구 하나**를 'reason' 필드에 삽입하세요.
     3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "완성된 템플릿 문장"}
     `;
 
@@ -250,13 +244,9 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
         
-        // 파싱 실패 시, 시스템 룰을 따르되 오류 메시지 노출
-        const resultText = isGaMok || isNaMok ? '예' : '아니오';
-        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
-
-    } catch (e) {
-        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
-    }
+        // 파싱 실패 시, 시스템의 기본 설명 반환
+        return { decision: isGaMok || isNaMok ? '예' : '아니오', reason: gradeInfo.desc_prefix };
+    } catch (e) { return { decision: isGaMok || isNaMok ? '예' : '아니오', reason: gradeInfo.desc_prefix }; }
 }
 
 // 9. API 핸들러
