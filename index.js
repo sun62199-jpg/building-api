@@ -204,39 +204,37 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
     };
 }
 
-// 8. LLM 설명 생성 (2차: AI 판단 및 설명)
+// ============================================================
+// 8. LLM 판단 및 설명 생성 (문구 강제 제어)
+// ============================================================
+
+// 8.1 LLM 판단 (MOLIT 기반)
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
+    const usage = molitSummary.gaMokType || '공동주택/기타';
     
-    // 🚨 LLM에게 전달할 팩트 주입 (계산 결과를 텍스트로 전달)
-    const floorCheck = finalFloor >= 16 ? "16층 이상 (조건 충족 O)" : `16층 미만 (${finalFloor}층, 조건 미달 X)`;
-    const areaCheck = area >= 5000 ? "5000㎡ 이상 (조건 충족 O)" : `5000㎡ 미만 (${area}㎡, 조건 미달 X)`;
-    const isElevator = (elevatorSummary.maxFloor > 0 || finalFloor >= 2) ? "보유(또는 간주)" : "미보유";
-    
-    // 최종 판정 미리 계산 (LLM에게 줄 정답)
-    let finalDecision = "일반건축물";
-    if (finalFloor >= 16 || area >= 5000) finalDecision = "다중이용건축물";
-    else if (isElevator === "미보유" && finalFloor < 2) finalDecision = "대상아님";
+    // 🚨 팩트 기반 판단 (Node.js Logic Check)
+    const isGaMok = area >= 5000;
+    const isNaMok = finalFloor >= 16;
 
     const prompt = `
-    [역할] 건축물 안전관리 판별관 AI
-    [팩트 데이터]
-    1. 층수 기준: ${floorCheck}
-    2. 면적 기준: ${areaCheck}
-    3. 승강기: ${isElevator}
-    4. 시스템 1차 판정: ${finalDecision} (${gradeInfo.code} 등급)
+    [역할] 당신은 건축법 전문가이자 최종 문구를 작성하는 AI입니다.
     
-    [판단 기준]
-    1. 나목(층수): 16층 이상이면 해당.
-    2. 가목(면적): 5,000㎡ 이상이면 해당.
+    [핵심 데이터]
+    1. 최고 층수: ${finalFloor}층
+    2. 가목 면적: ${area.toFixed(2)}㎡
+    3. 가목 용도: ${usage}
     
+    [판단 기준 및 출력 템플릿]
+    1. **가목 해당 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+    2. **나목 해당 (층수 ≥ 16F):** '해당 건물은 일반건축물 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    3. **일반 건축물 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
+
     [지시사항]
-    위 [팩트 데이터]와 [판단 기준]을 근거로 최종 판단(예/아니오)과 이유를 설명하는 문장을 작성하세요.
-    - 층수/면적 중 무엇 때문에 해당되는지 명시하며, 층수 비교(Max) 로직을 언급하세요.
-    - 주의: 6층은 16층보다 작으므로 해당하지 않음.
-    
-    [출력] JSON: {"decision": "예/아니오", "reason": "설명 문장"}
+    1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
+    2. **문구 생성:** 위 판단 결과에 따라 **정확히 해당되는 템플릿 문구 하나**를 'reason' 필드에 삽입하세요. (예: 15층이면 나목 템플릿을 선택하면 안 됨)
+    3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "완성된 템플릿 문장"}
     `;
 
     try {
@@ -244,11 +242,56 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
             model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
             temperature: 0.0, max_tokens: 350,
         });
+        
         const content = response.choices[0].message.content.trim();
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
-        return { decision: finalDecision === '다중이용건축물' ? '예' : '아니오', reason: gradeInfo.desc_prefix }; 
-    } catch (e) { return { decision: finalDecision === '다중이용건축물' ? '예' : '아니오', reason: gradeInfo.desc_prefix }; }
+        
+        // 파싱 실패 시, 시스템 룰을 따르되 오류 메시지 노출
+        const resultText = isGaMok || isNaMok ? '예' : '아니오';
+        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 인한 원문 복구 실패)" };
+
+    } catch (e) {
+        // API 오류 시 Node.js가 계산한 결과 기반으로 Fallback
+        const resultText = isGaMok || isNaMok ? '예' : '아니오';
+        return { decision: resultText, reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
+    }
+}
+
+// 8.2 LLM Elevator Judgment (승강기 데이터 단독 판단)
+async function llmElevatorJudgment(elevatorSummary) {
+    const floor = elevatorSummary.maxFloor;
+    const isMulti = floor >= 16;
+    const resultText = isMulti ? "예" : "아니오";
+
+    const prompt = `
+    [상황] 건축물대장이 조회되지 않아 승강기 정보로만 판단해야 함.
+    [데이터] 최고 층수: ${floor}층.
+    
+    [판단 기준 및 출력 템플릿]
+    1. **나목 충족 (16층 이상):** '해당 건물은 (건축물대장 부재로 승강기 정보 기준) 최고층 ${floor}층이므로 "나"목 항목에 해당합니다.'
+    2. **일반 건축물 (16층 미만):** '건축물대장이 조회되지 않았습니다. 승강기 정보(${floor}층)를 기준으로 일반 건축물로 판단됩니다.'
+
+    [지시사항]
+    16층 이상이면 나목 템플릿을, 미만이면 일반 건축물 템플릿을 선택하여 설명 문장을 작성하시오.
+    
+    [출력 형식]
+    JSON 포맷만 출력: {"decision": "${resultText}", "reason": "설명 문장"}
+    `;
+    
+    try {
+        const response = await openai.chat.completions.create({
+            model: "gpt-3.5-turbo", messages: [{ role: "user", content: prompt }],
+            temperature: 0.0, max_tokens: 300,
+        });
+        const content = response.choices[0].message.content.trim();
+        const s = content.indexOf('{'), e = content.lastIndexOf('}');
+        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
+        
+        return { decision: resultText, reason: "승강기 정보 기반 판단입니다. (대장 미조회)" };
+    } catch (e) {
+        return { decision: resultText, reason: "승강기 정보 기반 판단입니다. (AI 오류)" };
+    }
 }
 
 // 9. API 핸들러
@@ -320,3 +363,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
