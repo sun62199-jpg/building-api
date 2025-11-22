@@ -151,7 +151,7 @@
 
                 // 규정 판단 텍스트 및 아이콘 매핑
                 const ruleCode = analysis.ruleBased; 
-                const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
+                const ruleText = ruleCode === 'RED' ? '다중이용건축물' : '일반건축물';
                 const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
                 
                 // 🚨 AI 판단 결과 매핑 (요청하신 대로 '예/아니오' -> '다중/일반'으로 변환)
@@ -196,16 +196,16 @@
                                 <div class="text-2xl">${ruleIcon}</div>
                             </div>
 
-                            <div class="p-3 rounded-lg border border-yellow-500 bg-yellow-50 flex justify-between items-center">
+                            <div class="p-3 rounded-lg border border-blue-500 bg-blue-50 flex justify-between items-center">
                                 <div>
-                                    <p class="text-xs font-bold text-yellow-800 mb-1 flex items-center">
+                                    <p class="text-xs font-bold text-blue-800 mb-1 flex items-center">
                                         🧠 AI 판단
                                     </p>
-                                    <p class="text-sm font-bold text-yellow-900">
+                                    <p class="text-sm font-bold text-blue-900">
                                         ${aiDecisionDisplay}
                                     </p>
                                 </div>
-                                <span class="text-sm px-2 py-1 rounded bg-yellow-200 border border-yellow-400 text-yellow-700 font-bold">
+                                <span class="text-sm px-2 py-1 rounded bg-blue-200 border border-blue-400 text-blue-700 font-bold">
                                     ${aiDecisionDisplay}
                                 </span>
                             </div>
