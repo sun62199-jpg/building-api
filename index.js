@@ -184,14 +184,14 @@ function determineSafetyGrade(molitSummary, elevatorSummary, isFallback) {
         const isEducationNeeded = finalMaxFloor >= 2;
         
         return {
-            code: 'BLUE', badge: isEducationNeeded ? '교육 대상' : '대상 아님', colorTheme: 'green', // 초록색 (일반)
+            code: 'BLUE', badge: isEducationNeeded ? '교육 대상' : '대상 아님', colorTheme: 'green',
             title: isEducationNeeded ? '승강기 관리교육(4시간)' : '교육 의무 없음',
             reason_type: '일반건축물',
-            desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
+            desc_prefix: '해당 건물은 일반건축물로 해당합니다.' 
         };
     }
 
-    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠지므로, 여기는 불필요하지만 안전장치로 유지)
+    // [GRAY] 대상 아님 (데이터가 아예 없을 때만 404로 빠짐)
     return {
         code: 'GRAY', badge: '대상 아님', colorTheme: 'gray', title: '교육 의무 없음',
         reason_type: '대상 아님', desc_prefix: '1층 이하의 건물이거나 승강기가 없어 교육 대상이 아닙니다.'
@@ -205,7 +205,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     const usage = molitSummary.gaMokType || '공동주택/기타';
     
     const isGaMok = area >= 5000;
-    const isNaMok = finalMaxFloor >= 16;
+    const isNaMok = finalFloor >= 16;
 
     const prompt = `
     [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 아래 논리 구조를 엄격히 따르는 것입니다.)
@@ -221,11 +221,8 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
     3. **일반 템플릿 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
 
     [지시사항 - 템플릿 선택 우선순위]
-    1. **판단:** 아래 우선순위에 따라 최종 판단('예'/'아니오')을 내리세요.
-         - **최우선 순위:** 가목 해당 (면적 ≥ 5000㎡)
-         - **차선 순위:** 나목 해당 (층수 ≥ 16F)
-         - **최종 순위:** 일반 건축물 (나머지 모든 경우)
-    2. **문구 생성:** 위 우선순위에 따라 **정확히 해당되는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
+    1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
+    2. **문구 생성:** 위 판단 결과에 따라 [출력 템플릿] 중 **가장 높은 순위에 해당하는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
     3. **출력:** JSON Only: {"decision": "예/아니오", "reason": "선택된 문구"}
     `;
 
@@ -315,4 +312,3 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
-
