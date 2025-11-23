@@ -50,42 +50,56 @@ async function searchAddress(input) {
 
 // 5. 데이터 조회 함수들
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
-  const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
-  const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
-  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-  try {
-    const res = await fetch(url.toString());
-    const text = await res.text();
-    if (!res.ok) return [];
-    const data = JSON.parse(text);
-    if (data.response?.header?.resultCode !== "00") return [];
-    const rawItems = data.response?.body?.items?.item;
-    if (!rawItems) return [];
-    return Array.isArray(rawItems) ? rawItems : [rawItems];
-  } catch (e) { return []; }
+    const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
+    const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
+    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+    try {
+        const res = await fetch(url.toString());
+        const text = await res.text();
+        if (!res.ok) return [];
+        const data = JSON.parse(text);
+        if (data.response?.header?.resultCode !== "00") return [];
+        const rawItems = data.response?.body?.items?.item;
+        if (!rawItems) return [];
+        return Array.isArray(rawItems) ? rawItems : [rawItems];
+    } catch (e) { return []; }
 }
 
 async function fetchBuildingRegister(addressInfo) {
-  const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
-  const baseJi = Number(ji); const jiOffsets = [0, -1, 1, -2, 2]; 
-  for (const offset of jiOffsets) {
-    const targetJi = String(baseJi + offset).padStart(4, '0');
-    const items = await callMolitApiSingle(sigunguCd, bjdongCd, bun, targetJi);
-    if (items.length > 0) return items;
-  }
-  return [];
+    const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
+    const baseJi = Number(ji); const jiOffsets = [0, -1, 1, -2, 2];
+    for (const offset of jiOffsets) {
+        const targetJi = String(baseJi + offset).padStart(4, '0');
+        const items = await callMolitApiSingle(sigunguCd, bjdongCd, bun, targetJi);
+        if (items.length > 0) return items;
+    }
+    return [];
 }
 
+// 🚨 수정: 모든 단어를 검색 후보에 추가
 function generateElevatorSearchNames(addressInfo) {
     const rawBuldNm = addressInfo.buldNm;
     if (!rawBuldNm || rawBuldNm.length < 2) return [];
+
     const cleaned = rawBuldNm.replace(/\s/g, '');
-    let names = new Set([cleaned]);
+    let names = new Set([cleaned]); // 후보 1: 공백 제거된 전체 이름 (예: 양주옥정듀클래스)
+
+    // 🚨 새로운 로직: 공백 기준으로 분할된 모든 단어를 추가 (예: 양주옥정, 듀클래스)
+    rawBuldNm.split(/\s+/).forEach(word => {
+        const trimmedWord = word.replace(/\s/g, '');
+        if (trimmedWord.length > 1) names.add(trimmedWord); 
+    });
+    
     const matchDanji = cleaned.match(/(\d+단지)$/);
-    if (matchDanji) names.add(matchDanji[1]);
-    const firstWord = rawBuldNm.split(/\s+/)[0];
-    if (firstWord && firstWord !== cleaned) names.add(firstWord);
-    const filterOut = [addressInfo.siNm, addressInfo.sggNm, addressInfo.siNm.replace(/도|시/g, ''), addressInfo.sggNm.replace(/시|군|구/g, '')];
+    if (matchDanji) names.add(matchDanji[1]); // 후보 3: 단지 번호 (예: 15단지)
+
+    // 지역명 필터링 목록 (양주, 경기 등)
+    const filterOut = [
+        addressInfo.siNm, addressInfo.sggNm, 
+        addressInfo.siNm.replace(/도|시/g, ''), addressInfo.sggNm.replace(/시|군|구/g, '')
+    ];
+
+    // 최종 후보 목록: 지역명과 완전히 일치하는 후보는 제외
     return Array.from(names).filter(n => n.length > 1 && !filterOut.includes(n));
 }
 
@@ -108,13 +122,28 @@ async function fetchElevatorInfo(siNm, sggNm, buldNm) {
     } catch (e) { return { count: 0, items: [] }; }
 }
 
+// 🚨 대폭 수정: 모든 검색어의 결과를 모아서 반환 (Gather & Score)
 async function searchElevatorWithFallbackNames(addressInfo) {
     const searchNames = generateElevatorSearchNames(addressInfo);
+    const allItems = [];
+    const uniqueElevatorNos = new Set();
+    
+    // Step 1: 모든 검색어(양주옥정듀클래스, 양주옥정, 듀클래스 등)로 API 호출
     for (const name of searchNames) {
         const result = await fetchElevatorInfo(addressInfo.siNm, addressInfo.sggNm, name);
-        if (result.count > 0) return result;
+        if (result.count > 0 && result.items) {
+            // Step 2: 중복 승강기 번호(elevatorNo)를 제거하며 모든 결과를 하나의 리스트에 수집
+            result.items.forEach(item => {
+                if (!uniqueElevatorNos.has(item.elevatorNo)) {
+                    uniqueElevatorNos.add(item.elevatorNo);
+                    allItems.push(item);
+                }
+            });
+        }
     }
-    return { count: 0, items: [] };
+
+    // Step 3: 모든 검색 결과를 반환. API 핸들러에서 최종 비교 및 선택을 진행합니다.
+    return { count: allItems.length, items: allItems };
 }
 
 function calculateSimilarity(str1, str2) {
@@ -125,14 +154,28 @@ function calculateSimilarity(str1, str2) {
     return matches / Math.max(s1.length, s2.length);
 }
 
+// 🚨 수정: 최소 유사도 점수 (0.9)를 적용하여 엉뚱한 승강기 결과 선택 방지
 function findBestMatchingElevator(targetName, elevatorItems) {
-    let best = null, max = -1;
+    const MIN_SIMILARITY_SCORE = 0.9; 
+    let best = null, maxScore = -1;
+    // 이제 elevatorItems는 모든 검색 결과(양주옥정 + 듀클래스 등)의 합집합입니다.
     const unique = Array.from(new Map(elevatorItems.map(i => [i.elevatorNo, i])).values());
+    
     for (const item of unique) {
+        // 최종 건물명(targetName)과 각 항목의 건물명(item.buldNm)을 비교하여 점수 산정
         const score = calculateSimilarity(targetName, item.buldNm);
-        if (score > max) { max = score; best = item; }
+        if (score > maxScore) { 
+            maxScore = score; 
+            best = item; 
+        }
     }
-    return best;
+    
+    // 최고 점수가 0.9 미만이면 잘못된 매칭으로 간주하여 null 반환
+    if (maxScore >= MIN_SIMILARITY_SCORE) {
+        return best;
+    }
+    
+    return null;
 }
 
 function getElevatorSummary(elevatorItems) {
@@ -141,15 +184,15 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
-// 6. MOLIT 요약 (🚨 수정: 필터링 제거)
+// 6. MOLIT 요약 (필터링 제거 유지)
 function buildMolitSummary(items) {
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        // 🚨 1. 0층/0면적 데이터 제거 로직만 유지
+        // 0면적 또는 0층인 데이터는 제외 (16층 미만인 경우만 해당)
         if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
         
-        // 🚨 2. 공장/창고 필터링 로직 제거됨 (pCode '17000' / '21000' 제거)
+        // 공장(17000) 또는 창고(21000) 필터링 로직 제거 상태 유지
         return true;
     });
     
@@ -318,6 +361,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
