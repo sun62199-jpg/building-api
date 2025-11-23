@@ -156,7 +156,7 @@ function calculateSimilarity(str1, str2) {
 
 // 🚨 수정: 최소 유사도 점수 (0.9)를 적용하여 엉뚱한 승강기 결과 선택 방지
 function findBestMatchingElevator(targetName, elevatorItems) {
-    const MIN_SIMILARITY_SCORE = 0.9; 
+    const MIN_SIMILARITY_SCORE = 0.75; 
     let best = null, maxScore = -1;
     // 이제 elevatorItems는 모든 검색 결과(양주옥정 + 듀클래스 등)의 합집합입니다.
     const unique = Array.from(new Map(elevatorItems.map(i => [i.elevatorNo, i])).values());
@@ -361,6 +361,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
