@@ -50,30 +50,30 @@ async function searchAddress(input) {
 
 // 5. 데이터 조회 함수들
 async function callMolitApiSingle(sigunguCd, bjdongCd, bun, ji) {
-    const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
-    const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
-    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-    try {
-        const res = await fetch(url.toString());
-        const text = await res.text();
-        if (!res.ok) return [];
-        const data = JSON.parse(text);
-        if (data.response?.header?.resultCode !== "00") return [];
-        const rawItems = data.response?.body?.items?.item;
-        if (!rawItems) return [];
-        return Array.isArray(rawItems) ? rawItems : [rawItems];
-    } catch (e) { return []; }
+  const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
+  const params = { serviceKey: MOLIT_KEY, sigunguCd, bjdongCd, platGbCd: "0", bun, ji, _type: "json", numOfRows: "100", pageNo: "1" };
+  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+  try {
+    const res = await fetch(url.toString());
+    const text = await res.text();
+    if (!res.ok) return [];
+    const data = JSON.parse(text);
+    if (data.response?.header?.resultCode !== "00") return [];
+    const rawItems = data.response?.body?.items?.item;
+    if (!rawItems) return [];
+    return Array.isArray(rawItems) ? rawItems : [rawItems];
+  } catch (e) { return []; }
 }
 
 async function fetchBuildingRegister(addressInfo) {
-    const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
-    const baseJi = Number(ji); const jiOffsets = [0, -1, 1, -2, 2];
-    for (const offset of jiOffsets) {
-        const targetJi = String(baseJi + offset).padStart(4, '0');
-        const items = await callMolitApiSingle(sigunguCd, bjdongCd, bun, targetJi);
-        if (items.length > 0) return items;
-    }
-    return [];
+  const { sigunguCd, bjdongCd, bun, ji } = addressInfo;
+  const baseJi = Number(ji); const jiOffsets = [0, -1, 1, -2, 2]; 
+  for (const offset of jiOffsets) {
+    const targetJi = String(baseJi + offset).padStart(4, '0');
+    const items = await callMolitApiSingle(sigunguCd, bjdongCd, bun, targetJi);
+    if (items.length > 0) return items;
+  }
+  return [];
 }
 
 function generateElevatorSearchNames(addressInfo) {
@@ -125,26 +125,14 @@ function calculateSimilarity(str1, str2) {
     return matches / Math.max(s1.length, s2.length);
 }
 
-// 🚨 수정: 최소 유사도 점수 (0.8)를 적용하여 엉뚱한 승강기 결과 선택 방지
 function findBestMatchingElevator(targetName, elevatorItems) {
-    const MIN_SIMILARITY_SCORE = 0.8; 
-    let best = null, maxScore = -1;
+    let best = null, max = -1;
     const unique = Array.from(new Map(elevatorItems.map(i => [i.elevatorNo, i])).values());
-    
     for (const item of unique) {
         const score = calculateSimilarity(targetName, item.buldNm);
-        if (score > maxScore) { 
-            maxScore = score; 
-            best = item; 
-        }
+        if (score > max) { max = score; best = item; }
     }
-    
-    // 최고 점수가 0.8 미만이면 잘못된 매칭으로 간주하여 null 반환
-    if (maxScore >= MIN_SIMILARITY_SCORE) {
-        return best;
-    }
-    
-    return null;
+    return best;
 }
 
 function getElevatorSummary(elevatorItems) {
@@ -153,18 +141,15 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
-// 6. MOLIT 요약 (🚨 수정: 공장/창고 필터링 제거)
+// 6. MOLIT 요약 (🚨 수정: 필터링 제거)
 function buildMolitSummary(items) {
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        // 0면적 또는 0층인 데이터는 제외 (16층 미만인 경우만 해당)
+        // 🚨 1. 0층/0면적 데이터 제거 로직만 유지
         if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
         
-        // 🚨 공장(17000) 또는 창고(21000) 필터링 로직을 제거했습니다.
-        // const pCode = it.mainPurpsCd?.trim() || '';
-        // if (pCode === '17000' || pCode === '21000') return false;
-        
+        // 🚨 2. 공장/창고 필터링 로직 제거됨 (pCode '17000' / '21000' 제거)
         return true;
     });
     
@@ -333,6 +318,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
