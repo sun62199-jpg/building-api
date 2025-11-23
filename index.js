@@ -155,27 +155,28 @@ function calculateSimilarity(str1, str2) {
 }
 
 // 🚨 수정: 최소 유사도 점수 (0.9)를 적용하여 엉뚱한 승강기 결과 선택 방지
+// 🚨 섹션 5의 findBestMatchingElevator 함수를 이 코드로 교체하십시오.
 function findBestMatchingElevator(targetName, elevatorItems) {
-    const MIN_SIMILARITY_SCORE = 0.75; 
+    const MIN_SIMILARITY_SCORE = 0.75; // ✅ 임계값 (Threshold) 조정됨
     let best = null, maxScore = -1;
-    // 이제 elevatorItems는 모든 검색 결과(양주옥정 + 듀클래스 등)의 합집합입니다.
     const unique = Array.from(new Map(elevatorItems.map(i => [i.elevatorNo, i])).values());
     
     for (const item of unique) {
-        // 최종 건물명(targetName)과 각 항목의 건물명(item.buldNm)을 비교하여 점수 산정
         const score = calculateSimilarity(targetName, item.buldNm);
+        
+        // 점수가 가장 높은 항목을 추적
         if (score > maxScore) { 
             maxScore = score; 
             best = item; 
         }
     }
     
-    // 최고 점수가 0.9 미만이면 잘못된 매칭으로 간주하여 null 반환
+    // 🚨 최종 필터링: 최고 점수가 MIN_SIMILARITY_SCORE를 넘는지 확인
     if (maxScore >= MIN_SIMILARITY_SCORE) {
-        return best;
+        return best; // 임계값 이상인 경우에만 반환
     }
     
-    return null;
+    return null; // 임계값 미만이면 null 반환 (오류 방지)
 }
 
 function getElevatorSummary(elevatorItems) {
@@ -361,6 +362,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
