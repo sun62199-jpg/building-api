@@ -141,13 +141,15 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
+// 6. MOLIT 요약 (🚨 수정: 필터링 제거)
 function buildMolitSummary(items) {
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
+        // 🚨 1. 0층/0면적 데이터 제거 로직만 유지
         if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
-        const pCode = it.mainPurpsCd?.trim() || '';
-        if (pCode === '17000' || pCode === '21000') return false;
+        
+        // 🚨 2. 공장/창고 필터링 로직 제거됨 (pCode '17000' / '21000' 제거)
         return true;
     });
     
@@ -316,6 +318,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
