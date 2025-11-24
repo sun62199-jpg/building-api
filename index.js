@@ -28,9 +28,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ---------------------------------------------------------
-// 4. Primary Search: By Elevator Number (V11.2 FIX)
-// ---------------------------------------------------------
+// 4. 승강기 번호 조회 (Primary Search)
 async function getElevatorBaseInfo(elevatorNo) {
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM`);
     const params = {
@@ -44,11 +42,7 @@ async function getElevatorBaseInfo(elevatorNo) {
         const res = await fetch(url.toString());
         if (!res.ok) throw new Error(`Elevator Detail API HTTP Error ${res.status}`);
         const data = await res.json();
-        
-        // 🚨 JSON 경로: response.header.resultCode 확인
         if (data.response?.header?.resultCode !== "00") return null;
-        
-        // 🚨 JSON 경로: response.body.item 반환
         return data.response?.body?.item || null; 
     } catch (e) {
         console.error(`[ELEVATOR SEARCH ERROR] Failed for No ${elevatorNo}: ${e.message}`);
@@ -56,11 +50,7 @@ async function getElevatorBaseInfo(elevatorNo) {
     }
 }
 
-// ---------------------------------------------------------
-// 5. Data Acquisition & Consolidation
-// ---------------------------------------------------------
-
-// 5-A. Juso API used for Reverse Geocoding (Gets codes for MOLIT)
+// 5. 데이터 획득 및 통합
 async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
     const searchAddr = roadAddr || jibunAddr;
     if (!searchAddr) return null;
@@ -75,14 +65,11 @@ async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
         const res = await fetch(url.toString());
         const data = await res.json();
         if (!data.results || data.results.common.errorCode !== "0") return null;
-
         const juso = data.results.juso[0];
         if (!juso) return null;
-        
-        const admCd = juso.admCd;
         return {
-            sigunguCd: admCd.substring(0, 5),
-            bjdongCd: admCd.substring(5, 10),
+            sigunguCd: juso.admCd.substring(0, 5),
+            bjdongCd: juso.admCd.substring(5, 10),
             bun: String(juso.lnbrMnnm || "").padStart(4, "0"), 
             ji: String(juso.lnbrSlno || "").padStart(4, "0"),
             roadAddr: juso.roadAddr,
@@ -94,81 +81,51 @@ async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
     }
 }
 
-// 5-D. Utility functions (V11.2 FIX)
 function getElevatorSummary(elevatorItems) {
     if (!elevatorItems?.length) return { maxFloor: 0 };
-    // 🚨 FIX: divGroundFloorCnt 필드를 사용하여 최고층을 계산 (새 스키마 반영)
     const maxFloor = Math.max(...elevatorItems.map(i => Number(i.divGroundFloorCnt) || 0));
     return { maxFloor };
 }
 
-// 5-B. Grouping all Elevators in the same building
 async function findAndGroupAllElevators(baseItem) {
-    // baseItem의 주소와 건물명을 기반으로 동일 건물 승강기 리스트 조회
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`);
-    
-    // 🚨 FIX: address1(지번주소)에서 시도/시군구 명칭 추출 (코드 대신 명칭 사용)
     const addrParts = baseItem.address1.split(' ');
     const sido = addrParts[0]; 
     const sigungu = addrParts[1]; 
     
     const params = {
         serviceKey: ELEVATOR_KEY, pageNo: "1", numOfRows: "100", _type: "json",
-        sido: sido, 
-        sigungu: sigungu, 
-        buld_nm: baseItem.buldNm, 
+        sido: sido, sigungu: sigungu, buld_nm: baseItem.buldNm, 
     };
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
     try {
         const res = await fetch(url.toString());
         const data = await res.json();
-        
         if (data.response?.header?.resultCode !== "00") {
-             // 실패 시 baseItem 하나만이라도 리턴하여 최소 정보 보장
              return { count: 1, items: [baseItem], hasEvacElevator: false, maxFloor: Number(baseItem.divGroundFloorCnt) || 0 };
         }
-        
         const rawItems = data.response?.body?.items?.item;
         const items = Array.isArray(rawItems) ? rawItems : (rawItems ? [rawItems] : []);
-        
         if (items.length === 0) {
              return { count: 1, items: [baseItem], hasEvacElevator: false, maxFloor: Number(baseItem.divGroundFloorCnt) || 0 };
         }
-
-        // 피난용 승강기 여부 체크
         const hasEvacElevator = items.some(i => i.elvtrKindNm && i.elvtrKindNm.includes('피난'));
-
-        // 최고층 확인 (V11.2: divGroundFloorCnt 사용)
         const maxFloorInGroup = getElevatorSummary(items).maxFloor;
-
-        return { 
-            count: items.length, 
-            items: items, 
-            hasEvacElevator: hasEvacElevator,
-            maxFloor: maxFloorInGroup
-        };
+        return { count: items.length, items: items, hasEvacElevator: hasEvacElevator, maxFloor: maxFloorInGroup };
     } catch (e) {
-        // console.error(`[ELEVATOR GROUP SEARCH ERROR]: ${e.message}`);
-        // 오류 시 baseItem 정보라도 반환
         return { count: 1, items: [baseItem], hasEvacElevator: false, maxFloor: Number(baseItem.divGroundFloorCnt) || 0 };
     }
 }
 
-// 5-C. MOLIT functions (using converted codes)
 async function fetchBuildingRegister(molitCodes) { 
   const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
   const params = { 
-    serviceKey: MOLIT_KEY, 
-    sigunguCd: molitCodes.sigunguCd, 
-    bjdongCd: molitCodes.bjdongCd, 
-    platGbCd: "0", 
-    bun: molitCodes.bun, 
-    ji: molitCodes.ji, 
+    serviceKey: MOLIT_KEY, sigunguCd: molitCodes.sigunguCd, bjdongCd: molitCodes.bjdongCd, 
+    platGbCd: "0", bun: molitCodes.bun, ji: molitCodes.ji, 
     _type: "json", numOfRows: "100", pageNo: "1" 
   };
   Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-
   try {
     const res = await fetch(url.toString());
     const text = await res.text();
@@ -180,8 +137,7 @@ async function fetchBuildingRegister(molitCodes) {
   } catch (e) { return []; }
 }
 
-
-// 6. MOLIT Summary
+// 6. MOLIT Summary (필터링 제거 버전 유지)
 function buildMolitSummary(items) { 
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
@@ -198,19 +154,16 @@ function buildMolitSummary(items) {
     return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
 }
 
-// 7. 안전 등급 결정 (Node.js 1차 판단)
+// 7. 안전 등급 결정 (색상 통일: RED->Blue, BLUE->Green)
 function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallback) {
-    const finalMaxFloor = elevatorSummary.maxFloor || 0;
+    const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
-    
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
     const hasEvacElevator = elevatorSummary.hasEvacElevator;
-
-    // FIX: baseItem에서 건물 용도를 추출
     const usageText = baseItem.buldPrpos || '공동주택/기타';
 
-    // 🚨 1. 피난용 엘리베이터 최우선 체크
+    // 1. 피난용 (최우선) -> RED (Blue Color)
     if (hasEvacElevator) {
         return {
             code: 'RED', badge: '교육 대상', colorTheme: 'blue',
@@ -220,11 +173,10 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
         };
     }
     
-    // [RED] 특수 관리 (12시간) - Na-mok or Ga-mok
+    // 2. 가목/나목 (특수) -> RED (Blue Color)
     if (isGaMok || isNaMok) {
         let descText;
         let reasonType;
-
         if (isGaMok) {
             reasonType = '다중이용건축물(가목)';
             descText = `해당 건물은 ${usageText}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.`;
@@ -232,7 +184,6 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
             reasonType = '16층 이상(나목)';
             descText = `해당 건물은 ${usageText} 용도이지만 최고층 ${finalMaxFloor}층이므로 연면적 관계없이 "나"목 항목에 해당합니다.`;
         }
-        
         return {
             code: 'RED', badge: '교육 대상', colorTheme: 'blue',
             title: '비상구출운전 승강기관리교육(12시간)',
@@ -241,8 +192,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
         };
     }
 
-    // 🚨 [BLUE] 일반 관리 (4시간)
-    // 나머지 모든 경우는 일반 건축물로 처리 (GRAY 없음)
+    // 3. 일반 (나머지 전체) -> BLUE (Green Color)
     return {
         code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
         title: '승강기 관리교육(4시간)',
@@ -251,35 +201,26 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
     };
 }
 
-// 8. LLM 설명 생성 (2차: AI 판단 및 설명 - 문구 강제)
+// 8. LLM 설명 생성 (템플릿 선택 강제)
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, baseItem) {
-    const finalFloor = elevatorSummary.maxFloor || 0;
+    const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     const usage = baseItem.buldPrpos || '공동주택/기타';
-    
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
 
-    const finalDecision = (isGaMok || isNaMok || elevatorSummary.hasEvacElevator) ? "예" : "아니오";
+    // 🚨 Node.js의 최종 템플릿을 그대로 전달
     const templateText = gradeInfo.desc_prefix; 
+    const finalDecision = (gradeInfo.code === 'RED') ? "예" : "아니오";
 
     const prompt = `
-    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 논리 구조를 엄격히 따르는 것입니다.)
+    [역할] 건축법 전문가 AI
+    [지시] 아래 [결정된 문구]를 그대로 사용하여 사용자에게 결과를 안내하세요. 문장의 의미를 바꾸지 마세요.
     
-    [핵심 데이터]
-    1. 최고 층수: ${finalFloor}층
-    2. 가목 면적: ${area.toFixed(2)}㎡
-    3. 가목 용도: ${usage}
-    
-    [지시사항]
-    1. **판단:** 'decision' 필드에 '${finalDecision}'를 확정하세요.
-    2. **문구 생성:** 아래 [결정된 법적 템플릿]의 내용을 확인하고 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
-    
-    [결정된 법적 템플릿]
+    [결정된 문구]
     "${templateText}"
     
-    [출력 형식]
-    JSON Only: {"decision": "${finalDecision}", "reason": "템플릿 문구"}
+    [출력] JSON Only: {"decision": "${finalDecision}", "reason": "결정된 문구 그대로 출력"}
     `;
 
     try {
@@ -290,44 +231,46 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, 
         const content = response.choices[0].message.content.trim();
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
-        
         return { decision: finalDecision, reason: gradeInfo.desc_prefix };
     } catch (e) {
         return { decision: finalDecision, reason: gradeInfo.desc_prefix };
     }
 }
 
-// 9. API 핸들러 (V11.3 FIX)
+// 9. API 핸들러 (로직 통합)
 async function apiSummaryHandler(req, res) {
     try {
         const input = req.body.addr; 
         if (!input) return res.status(400).json({ error: "승강기 번호가 필요합니다." });
 
-        // 1. 1차 정보 획득
+        // 1. 승강기 번호 조회
         const baseItem = await getElevatorBaseInfo(input); 
         if (!baseItem) return res.status(404).json({ error: "승강기 번호 조회 실패", detail: "일치하는 승강기 정보가 없습니다." });
         
-        // 2. 동일 건물 승강기 그룹화
+        // 2. 건물 통합
         const groupResult = await findAndGroupAllElevators(baseItem);
-        
         const finalMaxFloor = groupResult.maxFloor;
         const hasEvacElevator = groupResult.hasEvacElevator;
         
         let molitSummary = { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
+        let molitCodes = null;
 
-        // 3. MOLIT 조회 필요성 판단 (피난용X, 16층 미만)
+        // 3. MOLIT 조회 (나목/피난용 아니면 무조건 조회 시도)
         if (!hasEvacElevator && finalMaxFloor < 16) {
-            const molitCodes = await reverseAddressToMolitCode(baseItem.address2, baseItem.address1);
+            // 주소 변환 시도
+            molitCodes = await reverseAddressToMolitCode(baseItem.address2, baseItem.address1);
             if (molitCodes) {
                 const molitItems = await fetchBuildingRegister(molitCodes);
                 molitSummary = buildMolitSummary(molitItems);
             }
         }
         
-        // 4. 최종 등급 판단 (Node.js)
+        // 4. 등급 결정
+        // isFallback은 여기서 'MOLIT 조회 시도했으나 실패했거나 건너뜀'을 의미할 수 있으나,
+        // V11.3에서는 determineSafetyGrade가 자체적으로 판단하므로 false로 전달해도 무방함.
         const gradeInfo = determineSafetyGrade(molitSummary, groupResult, baseItem, false); 
         
-        // 5. LLM 판단 및 설명
+        // 5. LLM 생성
         const llmResult = await generateLLMDescription(gradeInfo, molitSummary, groupResult, baseItem);
 
         res.json({
