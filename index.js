@@ -19,7 +19,7 @@ const OPENAI_KEY = process.env.OPENAI_KEY;
 const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
 
 if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
-  console.warn("⚠️ 필수 환경변수 누락 확인 필요");
+  console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
@@ -44,7 +44,6 @@ async function getElevatorBaseInfo(elevatorNo) {
         const res = await fetch(url.toString());
         const data = await res.json();
         
-        // JSON 경로 안전 확인
         if (data.response?.header?.resultCode !== "00") return null;
         return data.response?.body?.item || null; 
     } catch (e) {
@@ -53,14 +52,17 @@ async function getElevatorBaseInfo(elevatorNo) {
 }
 
 // ---------------------------------------------------------
-// 5. Data Acquisition & Consolidation
+// 5. Data Acquisition & Consolidation (FIXED)
 // ---------------------------------------------------------
 
-// 5-A. Juso API (Reverse Geocoding)
+// 5-A. Juso API (주소 정제 추가)
 async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
-    // 정확도를 위해 도로명 주소 우선 사용
-    const searchAddr = roadAddr || jibunAddr;
+    // 🚨 FIX: 주소에서 괄호 및 특수문자 제거 (예: "~~~ (덕계동)" -> "~~~")
+    let searchAddr = roadAddr || jibunAddr;
     if (!searchAddr) return null;
+
+    // 괄호 제거 정규식
+    searchAddr = searchAddr.replace(/\(.*\)/g, '').trim();
     
     const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
     const params = {
@@ -71,10 +73,12 @@ async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
     try {
         const res = await fetch(url.toString());
         const data = await res.json();
+        
+        // 검색 결과 체크
         if (!data.results || data.results.common.errorCode !== "0") return null;
+        if (!data.results.juso || data.results.juso.length === 0) return null;
 
         const juso = data.results.juso[0];
-        if (!juso) return null;
         
         return {
             sigunguCd: juso.admCd.substring(0, 5),
@@ -85,6 +89,7 @@ async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
             jibunAddr: juso.jibunAddr
         };
     } catch (e) {
+        console.error("JUSO API Error:", e.message);
         return null;
     }
 }
@@ -96,23 +101,20 @@ function getElevatorSummary(elevatorItems) {
     return { maxFloor };
 }
 
-// 5-B. Grouping all Elevators (FIXED: API Parameter & Fallback)
+// 5-B. Grouping all Elevators (FIXED: buldMgtNo Matching)
 async function findAndGroupAllElevators(baseItem) {
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`);
     
-    // 🚨 FIX: sigunguCd가 있으면 그것을 사용, 없으면 주소 파싱 (안전장치)
-    let sigunguCode = baseItem.sigunguCd;
-    let sidoName = baseItem.address1.split(' ')[0];
-
+    // 주소에서 시/도만 추출 (시군구는 생략하여 검색 범위 확대)
+    const sido = baseItem.address1.split(' ')[0]; 
+    
     const params = {
         serviceKey: ELEVATOR_KEY, pageNo: "1", numOfRows: "100", _type: "json",
-        sido: sidoName,
-        sigungu: sigunguCode, 
-        buld_nm: baseItem.buldNm, 
+        sido: sido, 
+        buld_nm: baseItem.buldNm, // 건물명으로 1차 검색
     };
     Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
 
-    // 기본값 (검색 실패 시 자기 자신만 리턴)
     const fallbackResult = { 
         count: 1, 
         items: [baseItem], 
@@ -131,12 +133,22 @@ async function findAndGroupAllElevators(baseItem) {
         
         if (items.length === 0) return fallbackResult;
 
-        const hasEvacElevator = items.some(i => i.elvtrKindNm && i.elvtrKindNm.includes('피난'));
-        const maxFloorInGroup = getElevatorSummary(items).maxFloor;
+        // 🚨 핵심 수정: 건물관리번호(buldMgtNo1, buldMgtNo2)가 일치하는 승강기만 필터링
+        // (동일 단지 내 여러 동이 있을 수 있으므로, 건물명으로 검색 후 관리번호로 2차 필터링)
+        const sameBuildingElevators = items.filter(item => 
+            String(item.buldMgtNo1) === String(baseItem.buldMgtNo1) && 
+            String(item.buldMgtNo2) === String(baseItem.buldMgtNo2)
+        );
+
+        // 필터링 결과가 없으면(혹시 모를 데이터 불일치) 기본값 반환
+        if (sameBuildingElevators.length === 0) return fallbackResult;
+
+        const hasEvacElevator = sameBuildingElevators.some(i => i.elvtrKindNm && i.elvtrKindNm.includes('피난'));
+        const maxFloorInGroup = getElevatorSummary(sameBuildingElevators).maxFloor;
 
         return { 
-            count: items.length, 
-            items: items, 
+            count: sameBuildingElevators.length, 
+            items: sameBuildingElevators, 
             hasEvacElevator: hasEvacElevator,
             maxFloor: maxFloorInGroup
         };
@@ -176,87 +188,56 @@ function buildMolitSummary(items) {
     });
     
     const maxFloor = filtered.length ? Math.max(...filtered.map(it => Number(it.grndFlrCnt) || 0)) : 0;
-    // 가목 용도 필터링
-    const daJungList = filtered.filter(it => ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설", "종합병원", "관광숙박시설"].includes(it.mainPurpsCdNm));
-    
-    const gaMokArea = daJungList.reduce((sum, it) => sum + Number(it.totArea), 0);
-    // 대표 용도 추출
-    const gaMokType = daJungList.length > 0 ? daJungList[0].mainPurpsCdNm : null;
+    const daJungList = filtered.filter(it => ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
+    const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
+    const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
 
-    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType, items: daJungList };
+    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
 }
 
-
-// 7. 안전 등급 결정 (1차: Node.js)
+// 7. 안전 등급 결정
 function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallback) {
-    const finalMaxFloor = elevatorSummary.maxFloor || 0;
+    const finalMaxFloor = Math.max(molitSummary?.maxFloor || 0, elevatorSummary?.maxFloor || 0);
     const gaMokArea = molitSummary?.gaMokArea || 0;
     
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
-    const hasEvacElevator = elevatorSummary.hasEvacElevator;
 
-    const usageText = baseItem.buldPrpos || '공동주택/기타';
-
-    // [RED] 특수 관리 (12시간) - 1. 피난용
-    if (hasEvacElevator) {
-        return {
-            code: 'RED', badge: '교육 대상', colorTheme: 'blue',
-            title: '피난용 엘리베이터 승강기 관리교육(12시간)',
-            reason_type: '피난용 엘리베이터 설치',
-            desc_prefix: `해당 건물은 피난용 엘리베이터가 설치되어 있어 특수 관리 대상입니다.`
-        };
-    }
-    
-    // [RED] 특수 관리 (12시간) - 2. 가목/나목
+    // [RED] 특수 관리
     if (isGaMok || isNaMok) {
-        let descText;
-        let reasonType;
-
-        if (isGaMok) {
-            reasonType = '다중이용건축물(가목)';
-            descText = `해당 건물은 ${molitSummary.gaMokType || usageText}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.`;
-        } else {
-            reasonType = '16층 이상(나목)';
-            descText = `해당 건물은 ${usageText} 용도이지만 최고층 ${finalMaxFloor}층이므로 연면적 관계없이 "나"목 항목에 해당합니다.`;
-        }
-        
         return {
             code: 'RED', badge: '교육 대상', colorTheme: 'blue',
             title: '비상구출운전 승강기관리교육(12시간)',
-            reason_type: reasonType,
-            desc_prefix: descText
+            reason_type: isGaMok ? '다중이용건축물(가목)' : '16층 이상(나목)',
+            desc_prefix: isGaMok ? `해당 건물은 ${molitSummary.gaMokType || '공동주택/기타'}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.` : `해당 건물은 일반건축물 용도이지만 최고층 ${finalMaxFloor}층이므로 "나"목 항목에 해당합니다.`
         };
     }
 
-    // [BLUE] 일반 관리 (4시간) - 나머지 전체
+    // [BLUE] 일반 관리 (통합)
     return {
-        code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
+        code: 'BLUE', badge: '일반 건축물', colorTheme: 'green', 
         title: '승강기 관리교육(4시간)',
         reason_type: '일반건축물',
-        desc_prefix: '해당 건물은 일반건축물로 해당합니다.' 
+        desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
     };
 }
 
-// 8. LLM 설명 생성 (2차: AI 포장)
+// 8. LLM 설명 생성
 async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, baseItem) {
-    const finalFloor = elevatorSummary.maxFloor || 0;
+    const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     const usage = baseItem.buldPrpos || '공동주택/기타';
     
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
-    const finalDecision = (isGaMok || isNaMok || elevatorSummary.hasEvacElevator) ? "예" : "아니오";
+    const finalDecision = isGaMok || isNaMok ? "예" : "아니오";
     const templateText = gradeInfo.desc_prefix; 
 
     const prompt = `
     [역할] 건축법 전문가 AI
-    [지시] 아래 [결정된 문구]를 그대로 사용하여 사용자에게 결과를 안내하세요. 문장의 의미를 바꾸지 마세요.
-    
-    [결정된 문구]
-    "${templateText}"
-    
-    [출력] JSON Only: {"decision": "${finalDecision}", "reason": "결정된 문구 그대로 출력"}
+    [지시] 아래 [결정된 문구]를 그대로 사용하여 결과를 안내하세요.
+    [결정된 문구] "${templateText}"
+    [출력] JSON Only: {"decision": "${finalDecision}", "reason": "결정된 문구"}
     `;
 
     try {
@@ -273,7 +254,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, 
     }
 }
 
-// 9. API 핸들러 (로직 통합)
+// 9. API 핸들러
 async function apiSummaryHandler(req, res) {
     try {
         const input = req.body.addr; 
@@ -283,24 +264,25 @@ async function apiSummaryHandler(req, res) {
         const baseItem = await getElevatorBaseInfo(input); 
         if (!baseItem) return res.status(404).json({ error: "승강기 번호 조회 실패", detail: "일치하는 승강기 정보가 없습니다." });
         
-        // 2. 건물 통합
+        // 2. 건물 통합 (보유대수, 최고층 해결)
         const groupResult = await findAndGroupAllElevators(baseItem);
         
         const finalMaxFloor = groupResult.maxFloor;
         const hasEvacElevator = groupResult.hasEvacElevator;
         
         let molitSummary = { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
-        let molitQueryStatus = "SKIPPED"; // 상태 플래그 추가 (SKIPPED, SUCCESS, FAILED)
+        let molitStatus = "SKIPPED"; // 조회 상태값
 
         // 3. MOLIT 조회 (피난용X, 16층 미만이면 무조건 조회)
+        // 🚨 FIX: 16층 미만이면 주소 정제 후 무조건 조회 시도
         if (!hasEvacElevator && finalMaxFloor < 16) {
             const molitCodes = await reverseAddressToMolitCode(baseItem.address2, baseItem.address1);
             if (molitCodes) {
                 const molitItems = await fetchBuildingRegister(molitCodes);
                 molitSummary = buildMolitSummary(molitItems);
-                molitQueryStatus = "SUCCESS";
+                molitStatus = molitItems.length > 0 ? "SUCCESS" : "NO_DATA";
             } else {
-                molitQueryStatus = "FAILED"; // 주소 변환 실패 등
+                molitStatus = "FAILED"; // 주소 변환 실패
             }
         }
         
@@ -335,10 +317,9 @@ async function apiSummaryHandler(req, res) {
                 최고지상층수: molitSummary.maxFloor,
                 가목_연면적_합계: molitSummary.gaMokArea,
                 elevatorCount: groupResult.count,
-                // 🚨 데이터 누락 방지
                 elevatorMaxFloor: groupResult.maxFloor,
                 buldPrpos: baseItem.buldPrpos,
-                molitStatus: molitQueryStatus // 상태값 전달
+                molitStatus: molitStatus
             },
             raw: { baseElevatorItem: baseItem, molitItems: molitSummary.items }
         });
