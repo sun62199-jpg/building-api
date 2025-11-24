@@ -7,9 +7,7 @@ require("dotenv").config();
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
-const OpenAI = new OpenAI({ openai_key: OPENAI_KEY }); // Note: Correcting typo in original code if it exists.
-// Assuming the user's original code uses the standard OpenAI initialization correctly:
-const openai = new OpenAI({ apiKey: OPENAI_KEY });
+const OpenAI = require("openai"); // 🚨 FIX: OpenAI 클래스 import
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -24,6 +22,9 @@ if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
   console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
 }
 
+// 🚨 FIX: OpenAI 클라이언트 인스턴스를 소문자 'openai'에 할당하여 ReferenceError 해결
+const openai = new OpenAI({ apiKey: OPENAI_KEY }); 
+
 // 3. 미들웨어
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -31,10 +32,11 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // ============================================================
 // UTILITY FUNCTIONS (Section 4, 5, 6 Consolidated)
+// (V11.3 코드 원본 유지)
 // ============================================================
 
 
-// 4. Primary Search: By Elevator Number (New V11.2 Base Item Getter)
+// 4. Primary Search: By Elevator Number
 async function getElevatorBaseInfo(elevatorNo) {
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM`);
     const params = {
@@ -95,7 +97,6 @@ async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
 // 5-D. Utility functions (Max Floor Calculation)
 function getElevatorSummary(elevatorItems) {
     if (!elevatorItems?.length) return { maxFloor: 0 };
-    // Using divGroundFloorCnt field from the new Elevator API schema
     const maxFloor = Math.max(...elevatorItems.map(i => Number(i.divGroundFloorCnt) || 0));
     return { maxFloor };
 }
@@ -174,7 +175,6 @@ function buildMolitSummary(items) {
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
         if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
-        // 공장/창고 필터링은 제거된 상태 유지
         return true; 
     });
     
@@ -264,7 +264,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, 
     [핵심 데이터]
     1. 최고 층수: ${finalFloor}층
     2. 가목 면적: ${area.toFixed(2)}㎡
-    3. 가목 용도: ${usage}
+    3. 건물 용도: ${usage}
     
     [판단 기준 및 출력 템플릿]
     1. **가목 템플릿 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
@@ -298,7 +298,7 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, 
 // 9. API 핸들러
 async function apiSummaryHandler(req, res) {
     try {
-        const input = req.body.addr; // 클라이언트는 여전히 'addr'로 보냄
+        const input = req.body.addr; // V11.3: 승강기 번호 입력
         if (!input) return res.status(400).json({ error: "승강기 번호가 필요합니다." });
 
         // 1. 1차 정보 획득 (승강기 번호로 직접 조회)
@@ -359,7 +359,6 @@ async function apiSummaryHandler(req, res) {
                 최고지상층수: molitSummary.maxFloor,
                 가목_연면적_합계: molitSummary.gaMokArea,
                 elevatorCount: groupResult.count,
-                // FIX: Client HTML에 필요한 elevatorMaxFloor, buldPrpos를 직접 추가
                 elevatorMaxFloor: groupResult.maxFloor,
                 buldPrpos: baseItem.buldPrpos
             },
