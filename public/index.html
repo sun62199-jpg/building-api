@@ -141,9 +141,9 @@
                 const elevCount = summaryDetails.elevatorCount || 0;
                 
                 // UX: 연면적 표시 제어
-                const areaDisplay = (totalAreaSum > 0 && analysis.ruleBased === 'RED')
-                    ? `<b>${totalAreaSum.toFixed(2)}㎡</b>`
-                    : '조회 불필요';
+                const areaDisplay = (summaryDetails.molitStatus === 'SKIPPED') ? '조회 생략 (16층 이상)' 
+                  : (summaryDetails.molitStatus === 'FAILED') ? '조회 실패 (정보 없음)'
+                  : `<b>${totalAreaSum}㎡</b>`;
                 const buildingUsage = summaryDetails.gaMokType || '정보 없음';
 
 
