@@ -219,8 +219,8 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     6. 가목 용도 목록(참고용): ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
 
     [판결 기준 (우선순위 순)]
-    1. **[다중이용건축물-피난]**: '피난용 승강기'가 설치되어 있다면 무조건 이 등급입니다. (최우선)
-    2. **[다중이용건축물]**: 피난용은 없지만, (층수≥16충) OR (가목 연면적 합계≥5,000㎡)인 경우입니다.
+    1. **[다중이용건축물-피난]**: '피난용 승강기'가 설치되어 있다면 무조건 이 등급입니다.
+    2. **[다중이용건축물]**: 피난용은 없지만, (층수≥16충) OR (가목 해당 용도 여부에 TRUE이고, 가목 연면적 합계≥5,000㎡)인 경우입니다.
     3. **[일반건축물]**: 위 두 경우에 해당하지 않는 모든 경우입니다.
 
     [판결 지시사항]
@@ -349,6 +349,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
