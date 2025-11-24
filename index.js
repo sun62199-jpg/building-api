@@ -159,44 +159,30 @@ async function fetchBuildingRegister(molitCodes) { // Takes the output of revers
   } catch (e) { return []; }
 }
 
-// 5-D. Utility functions
+// 5-D. Utility functions (V11.2 수정)
 function getElevatorSummary(elevatorItems) {
     if (!elevatorItems?.length) return { maxFloor: 0 };
+    // 🚨 FIX: divGroundFloorCnt 필드를 사용하여 최고층을 계산 (새 스키마 반영)
     const maxFloor = Math.max(...elevatorItems.map(i => Number(i.divGroundFloorCnt) || 0));
     return { maxFloor };
 }
 
-// 6. MOLIT Summary
-function buildMolitSummary(items) { 
-    const filtered = items.filter(it => {
-        const totArea = Number(it.totArea) || 0;
-        const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
-        // 공장/창고 필터링은 제거된 상태를 유지
-        return true; 
-    });
-    
-    const maxFloor = filtered.length ? Math.max(...filtered.map(it => Number(it.grndFlrCnt) || 0)) : 0;
-    const daJungList = filtered.filter(it => ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
-    const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
-    const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
 
-    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
-}
-
-// 7. 안전 등급 결정 (Node.js 1차 판단)
+// 7. 안전 등급 결정 (1차: Node.js) - V11.2 수정
+// 🚨 baseItem을 받아 건물 용도 정보를 직접 참조합니다.
 function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallback) {
     const finalMaxFloor = elevatorSummary.maxFloor || 0;
     const gaMokArea = molitSummary?.gaMokArea || 0;
-    
     const isGaMok = gaMokArea >= 5000;
     const isNaMok = finalMaxFloor >= 16;
-    const hasEvacElevator = elevatorSummary.hasEvacElevator;
+    
+    // 🚨 FIX: baseItem에서 건물 용도를 추출 (불일치 시 '공동주택/기타'로 폴백)
+    const usageText = baseItem.buldPrpos || '공동주택/기타';
 
-    // 🚨 1. 피난용 엘리베이터 최우선 체크
-    if (hasEvacElevator) {
+    // 🚨 1. 피난용 엘리베이터 최우선 체크 (이전 V11.0 로직 유지)
+    if (elevatorSummary.hasEvacElevator) {
         return {
-            code: 'RED', badge: '교육 대상', colorTheme: 'red',
+            code: 'RED', badge: '교육 대상', colorTheme: 'blue',
             title: '피난용 엘리베이터 승강기 관리교육(12시간)',
             reason_type: '피난용 엘리베이터 설치',
             desc_prefix: `해당 건물은 피난용 엘리베이터가 설치되어 있어 특수 관리 대상입니다.`
@@ -210,10 +196,11 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
 
         if (isGaMok) {
             reasonType = '다중이용건축물(가목)';
-            descText = `해당 건물은 ${baseItem.buldPrpos || '공동주택/기타'} 용도이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.`;
+            descText = `해당 건물은 ${usageText}이고 연면적이 ${gaMokArea.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.`;
         } else {
             reasonType = '16층 이상(나목)';
-            descText = `해당 건물은 ${baseItem.buldPrpos || '공동주택/기타'} 용도이지만 최고층 ${finalMaxFloor}층이므로 연면적 관계없이 "나"목 항목에 해당합니다.`;
+            // 🚨 FIX: 나목 템플릿에 용도와 층수 명시
+            descText = `해당 건물은 ${usageText} 용도이지만 최고층 ${finalMaxFloor}층이므로 연면적 관계없이 "나"목 항목에 해당합니다.`;
         }
         
         return {
@@ -224,7 +211,7 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
         };
     }
 
-    // [BLUE] 일반 관리 (4시간) - YELLOW/GRAY 통합 
+    // [BLUE] 일반 관리 (4시간) - 모든 16층 미만 건물 포함
     if (molitSummary.totalCount > 0 || elevatorSummary.maxFloor > 0) { 
         return {
             code: 'BLUE', badge: '일반 건축물', colorTheme: 'green',
@@ -236,40 +223,42 @@ function determineSafetyGrade(molitSummary, elevatorSummary, baseItem, isFallbac
 
     // [GRAY] 대상 아님 (최종 캐치-올)
     return {
-        code: 'BLUE', badge: '일반 건축물', colorTheme: 'green', 
+        code: 'BLUE', badge: '일반 건축물', colorTheme: 'gray', 
         title: '승강기 관리교육(4시간)',
         reason_type: '일반건축물', 
         desc_prefix: '해당 건물은 일반건축물로 해당합니다.'
     };
 }
 
-// 8. LLM 설명 생성 (2차: AI 판단 및 설명)
-async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) {
+
+// 8. LLM 설명 생성 (2차: AI 판단 및 설명) - V11.2 수정
+// 🚨 baseItem을 받아 LLM 프롬프트에 정확한 용도를 제공
+async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary, baseItem) {
     const finalFloor = elevatorSummary.maxFloor || 0;
     const area = molitSummary.gaMokArea || 0;
+    const usage = baseItem.buldPrpos || '공동주택/기타'; // 🚨 FIX: baseItem의 용도를 사용
     
     const isGaMok = area >= 5000;
     const isNaMok = finalFloor >= 16;
-
     const finalDecision = isGaMok || isNaMok ? "예" : "아니오";
-    const templateText = gradeInfo.desc_prefix; 
 
     const prompt = `
-    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 논리 구조를 엄격히 따르는 것입니다.)
+    [역할] 건축법 전문가이자 최종 문구를 작성하는 AI입니다. (귀하의 유일한 임무는 아래 논리 구조를 엄격히 따르는 것입니다.)
     
     [핵심 데이터]
     1. 최고 층수: ${finalFloor}층
     2. 가목 면적: ${area.toFixed(2)}㎡
+    3. 가목 용도: ${usage}
     
+    [판단 기준 및 출력 템플릿]
+    1. **가목 템플릿 (면적 ≥ 5000㎡):** '해당 건물은 ${usage}이고 연면적이 ${area.toFixed(2)}㎡이므로 "가"목 항목에 해당합니다.'
+    2. **나목 템플릿 (층수 ≥ 16F):** '해당 건물은 ${usage} 용도이지만 최고층 ${finalFloor}층이므로 "나"목 항목에 해당합니다.'
+    3. **일반 템플릿 (둘 다 미달):** '해당 건물은 일반건축물로 해당합니다.'
+
     [지시사항]
-    1. **판단:** 'decision' 필드에 '${finalDecision}'를 확정하세요.
-    2. **문구 생성:** 아래 [결정된 법적 템플릿]의 내용을 확인하고 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
-    
-    [결정된 법적 템플릿]
-    "${templateText}"
-    
-    [출력 형식]
-    JSON Only: {"decision": "${finalDecision}", "reason": "템플릿 문구"}
+    1. **판단:** 가목 또는 나목에 해당하면 '예', 아니면 '아니오'로 판단하세요.
+    2. **문구 생성:** 위 판단 결과에 따라 [출력 템플릿] 중 **가장 높은 순위에 해당하는 템플릿 문구 하나**를 선택하여 'reason' 필드에 삽입하세요. **문구 구조를 절대 변경하지 마시오.**
+    3. **출력:** JSON Only: {"decision": "${finalDecision}", "reason": "선택된 문구"}
     `;
 
     try {
@@ -283,14 +272,14 @@ async function generateLLMDescription(gradeInfo, molitSummary, elevatorSummary) 
         
         return { decision: finalDecision, reason: gradeInfo.desc_prefix + " (AI 파싱 오류로 원문 복구 실패)" };
     } catch (e) {
-        return { decision: finalDecision, reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
+        return { decision: gradeInfo.code === 'RED' ? '예' : '아니오', reason: gradeInfo.desc_prefix + " (AI 분석 중 오류 발생)" };
     }
 }
 
-// 9. API 핸들러
+// 9. API 핸들러 - V11.2 수정
 async function apiSummaryHandler(req, res) {
     try {
-        const input = req.body.addr; // 클라이언트는 여전히 'addr'로 보냄
+        const input = req.body.addr; // 승강기 번호 입력
         if (!input) return res.status(400).json({ error: "승강기 번호가 필요합니다." });
 
         // 1. 1차 정보 획득 (승강기 번호로 직접 조회)
@@ -300,32 +289,30 @@ async function apiSummaryHandler(req, res) {
         // 2. 동일 건물 승강기 그룹화 및 최고층 획득
         const groupResult = await findAndGroupAllElevators(baseItem);
         
-        // 3. 🚨 최적화 판단 (Na-mok check) 🚨
         const finalMaxFloor = groupResult.maxFloor;
         const hasEvacElevator = groupResult.hasEvacElevator;
         
         let molitCodes = null;
         let molitSummary = { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
 
-        // 4. MOLIT 조회 필요성 판단
-        // (피난용 승강기가 없거나 16층 미만일 때만 MOLIT 조회를 진행)
+        // 3. 🚨 MOLIT 조회 필요성 판단 및 실행 🚨
         if (!hasEvacElevator && finalMaxFloor < 16) {
             
             // 승강기 정보의 주소로 JUSO 역변환 (MOLIT 코드 획득)
             molitCodes = await reverseAddressToMolitCode(baseItem.address2, baseItem.address1);
             
-            // JUSO 역변환이 성공해야만 MOLIT 조회
             if (molitCodes) {
                 const molitItems = await fetchBuildingRegister(molitCodes);
                 molitSummary = buildMolitSummary(molitItems);
             }
         }
         
-        // 5. 최종 등급 판단 (Node.js)
+        // 4. 최종 등급 판단 (Node.js)
         const gradeInfo = determineSafetyGrade(molitSummary, groupResult, baseItem, false); 
         
-        // 6. LLM 판단 및 설명
-        const llmResult = await generateLLMDescription(gradeInfo, molitSummary, groupResult);
+        // 5. LLM 판단 및 설명
+        // 🚨 FIX: baseItem을 LLM 함수로 전달
+        const llmResult = await generateLLMDescription(gradeInfo, molitSummary, groupResult, baseItem);
 
         res.json({
             status: "ok",
@@ -335,6 +322,7 @@ async function apiSummaryHandler(req, res) {
                 mainTitle: gradeInfo.title,
                 description: llmResult.reason
             },
+            // 🚨 FIX: addressInfo는 baseItem의 주소를 사용
             addressInfo: { roadAddr: baseItem.address2, jibun: baseItem.address1 },
             analysis: {
                 ruleBased: gradeInfo.code,
@@ -361,8 +349,3 @@ async function apiSummaryHandler(req, res) {
         res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
     }
 }
-
-app.post("/api/summary", apiSummaryHandler);
-app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
-
