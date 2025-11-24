@@ -129,25 +129,25 @@
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // 🚨 FIX 1: Destructuring with safety and proper access
                 const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
                     uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
                 };
                 
-                // 🚨 FIX 2: 데이터 변수 안전 초기화 및 한글 키 매핑
+                // 데이터 변수 안전 초기화
                 const molitMaxF = summaryDetails.최고지상층수 || 0;
                 const totalAreaSum = summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
-                const elevMaxF = summaryDetails.elevatorMaxFloor || 0; // 승강기 최고층 (서버에서 추가된 키)
+                const elevMaxF = summaryDetails.elevatorMaxFloor || 0;
                 const elevCount = summaryDetails.elevatorCount || 0;
-                
+
                 // Color Map (V5.5 Final Colors)
                 const colorMap = {
-                    // RED code now uses BLUE color theme
+                    // RED code (특수 관리) -> Visual: BLUE
                     red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
-                    // BLUE/YELLOW/GRAY codes now use GREEN color theme
+                    // BLUE code (일반 관리) -> Visual: GREEN
                     blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
-                    yellow: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
-                    gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' }
+                    // GRAY/YELLOW (Catch-all) -> Visual: GREEN (통일)
+                    yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
+                    gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' } // 🚨 GRAY 블록도 GREEN으로 통일
                 };
                 const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
 
@@ -179,6 +179,9 @@
                             <p class="text-xs font-bold uppercase">안내 사항</p>
                             <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
                                 ${uiRender.mainTitle}
+                            </p>
+                            <p class="text-xs text-gray-500 mt-2 border-t border-gray-200 pt-2 leading-relaxed">
+                                ${uiRender.description}
                             </p>
                         </div>
 
