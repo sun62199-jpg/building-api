@@ -160,10 +160,10 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     [판결 기준 - 증거 데이터를 활용해서 셋중 하나를 정말 정확하게 판별해야합니다.]
     1. **[다중이용건축물-피난]**: '피난용 승강기'가 설치되어 있다면 무조건 이 등급입니다. '피난용 승강기'가 없다면 절대 아닙니다.
     2. **[다중이용건축물]**: 피난용은 없지만, (최고층수≥16층) OR (가목 용도 면적≥5,000㎡)인 경우입니다. 둘에 해당하지 않으면 절대 아닙니다.
-    3. **[일반건축물]**: 위 두 경우에 해당하지 않는 모든 경우입니다.
+    3. **[일반건축물]**: 위 다중이용건축물-피난과 다중이용건축물이 설치되지 않은 모든 건물입니다. 정확하게 판별해주세요.
 
     [판결 지시사항]
-    1. 위 [증거 데이터]를 [판결 기준]에 대입하여 논리적으로 추론하세요.
+    1. 위 [증거 데이터]를 [판결 기준]에 대입하여 논리적으로 정확하게 추론하세요.
     2. 최종 등급 명칭('다중이용건축물-피난', '다중이용건축물', '일반건축물') 중 하나를 정확히 선택하세요.
     3. 판단 이유를 사용자에게 설명하는 문장을 작성하세요.
 
@@ -279,5 +279,6 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
