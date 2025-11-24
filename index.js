@@ -223,21 +223,14 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     2. 최종 등급 명칭('다중이용건축물-피난', '다중이용건축물', '일반건축물') 중 하나를 정확히 선택하세요.
     3. 판단 이유를 사용자에게 설명하는 문장을 작성하세요.
        - 일반건축물일 경우: "해당 건물은 일반건축물로 해당합니다." 라고 명확히 말하세요.
-
+    
     [출력 형식 (JSON)]
     {
         "code": "RED 또는 BLUE", // 피난/다중=RED, 일반=BLUE
         "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 택1",
         "reason": "판결 이유 및 설명 문장"
     }
-    `;
-    [출력 형식 (JSON)]
-    {
-        "code": "RED 또는 BLUE", // 피난/다중=RED, 일반=BLUE
-        "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 택1",
-        "reason": "판결 이유 및 설명 문장"
-    }
-    `;
+  `;
 
     try {
         const response = await openai.chat.completions.create({
@@ -351,6 +344,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
