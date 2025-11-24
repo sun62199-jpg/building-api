@@ -129,41 +129,40 @@
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // 🚨 Server-Driven Data
+                // 🚨 FIX 1: Destructuring with safety and proper access
                 const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
                     uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
                 };
                 
-                // 데이터 변수 안전 초기화
+                // 🚨 FIX 2: 데이터 변수 안전 초기화 및 한글 키 매핑
                 const molitMaxF = summaryDetails.최고지상층수 || 0;
                 const totalAreaSum = summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
-                const elevMaxF = summaryDetails.elevatorMaxFloor || 0;
+                const elevMaxF = summaryDetails.elevatorMaxFloor || 0; // 승강기 최고층 (서버에서 추가된 키)
                 const elevCount = summaryDetails.elevatorCount || 0;
-
+                
                 // Color Map (V5.5 Final Colors)
                 const colorMap = {
+                    // RED code now uses BLUE color theme
                     red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
+                    // BLUE/YELLOW/GRAY codes now use GREEN color theme
                     blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
-                    yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
-                    gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' } 
+                    yellow: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
+                    gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' }
                 };
                 const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
 
                 // 규정 판단 텍스트 및 아이콘 매핑
                 const ruleCode = analysis.ruleBased; 
-                const ruleText = ruleCode === 'RED' ? '다중이용건축물' : '일반건축물';
+                const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
                 const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
-                
-                // 🚨 AI 판단 결과 매핑 (요청하신 대로 '예/아니오' -> '다중/일반'으로 변환)
-                const aiDecisionRaw = analysis.llmFinalDecision || '판단 불가';
+                const aiDecisionRaw = analysis.llmFinalDecision || '판단불가';
                 let aiDecisionDisplay = aiDecisionRaw;
                 if (aiDecisionRaw === '예') {
                     aiDecisionDisplay = '다중이용건축물';
                 } else if (aiDecisionRaw === '아니오') {
                     aiDecisionDisplay = '일반건축물';
                 }
-                
-                // 🚨 섹션 순서 변경 적용 (Judgement First, Data Last)
+
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
                         
@@ -177,7 +176,7 @@
                         </div>
                         
                         <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
-                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
+                            <p class="text-xs font-bold uppercase">안내 사항</p>
                             <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
                                 ${uiRender.mainTitle}
                             </p>
@@ -196,16 +195,16 @@
                                 <div class="text-2xl">${ruleIcon}</div>
                             </div>
 
-                            <div class="p-3 rounded-lg border border-blue-500 bg-blue-50 flex justify-between items-center">
+                            <div class="p-3 rounded-lg border border-yellow-500 bg-yellow-50 flex justify-between items-center">
                                 <div>
-                                    <p class="text-xs font-bold text-blue-800 mb-1 flex items-center">
+                                    <p class="text-xs font-bold text-yellow-800 mb-1 flex items-center">
                                         🧠 AI 판단
                                     </p>
-                                    <p class="text-sm font-bold text-blue-900">
+                                    <p class="text-sm font-bold text-yellow-900">
                                         ${aiDecisionDisplay}
                                     </p>
                                 </div>
-                                <span class="text-sm px-2 py-1 rounded bg-blue-200 border border-blue-400 text-blue-700 font-bold">
+                                <span class="text-sm px-2 py-1 rounded bg-yellow-200 border border-yellow-400 text-yellow-700 font-bold">
                                     ${aiDecisionDisplay}
                                 </span>
                             </div>
