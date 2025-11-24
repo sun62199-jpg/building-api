@@ -220,15 +220,13 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
 1. [다중이용건축물-피난]
    - 피난용 승강기가 "있음"이면 무조건 해당.
    - 피난용 승강기가 "없음"이면 절대 해당 불가.
-
 2. [다중이용건축물]
    - 피난용 승강기는 없지만 아래 조건 중 하나라도 TRUE이면 해당:
         a. 최고층수 ≥ 16
         b. 가목 용도 연면적 합계 ≥ 5,000
    - 둘 다 FALSE이면 해당 불가.
-
 3. [일반건축물]
-   - 위 1, 2번 조건을 모두 충족하지 않을 때만 해당.
+   - 위 1, 2번 조건이 모두 FALSE 일 때 해당.
 
 ============================================================
 [필수 판결 절차 — 위반 시 오류]
@@ -368,6 +366,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
