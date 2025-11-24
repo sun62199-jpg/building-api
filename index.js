@@ -167,7 +167,7 @@ function buildMolitSummary(items) {
     const filtered = items.filter(it => {
         const totArea = Number(it.totArea) || 0;
         const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        if ((totArea === 0 || grndFlrCnt === 0) && grndFlrCnt < 16) return false;
+        if (grndFlrCnt === 0) return false;
         return true; 
     });
     
@@ -344,6 +344,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
