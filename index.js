@@ -29,9 +29,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 // ---------------------------------------------------------
-// 4. Primary Search: By Elevator Number (NEW)
+// 4. Primary Search: By Elevator Number (V11.2 - JSON Path Fix)
 // ---------------------------------------------------------
-// 🚨 경로 수정: getElevatorDetailInfo -> getElevatorViewM
 async function getElevatorBaseInfo(elevatorNo) {
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM`);
     const params = {
@@ -46,10 +45,14 @@ async function getElevatorBaseInfo(elevatorNo) {
         if (!res.ok) throw new Error(`Elevator Detail API HTTP Error ${res.status}`);
         const data = await res.json();
         
-        if (data.response?.header?.resultCode !== "00") return null;
+        // 🚨 FIX 1: resultCode 체크 시 'response' 객체 경로 포함
+        if (data.response?.header?.resultCode !== "00") {
+             // 데이터가 없거나 서비스 오류일 경우 (예: RESULT CODE 03, NO DATA)
+             return null;
+        }
         
-        // Item 구조는 상세 스키마를 따름 (body.item)
-        return data.body?.item || null; 
+        // 🚨 FIX 2: Item 추출 시 'response' 객체 경로 포함
+        return data.response?.body?.item || null; 
     } catch (e) {
         console.error(`[ELEVATOR SEARCH ERROR] Failed for No ${elevatorNo}: ${e.message}`);
         return null;
@@ -362,3 +365,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
