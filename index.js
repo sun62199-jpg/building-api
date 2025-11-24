@@ -159,7 +159,7 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
 
     [판결 기준 - 증거 데이터를 활용해서 위에서부터 하나씩 확인하고, 정확하게 판별해야합니다.]
     1. **[다중이용건축물-피난]**: '피난용 승강기'가 설치되어 있다면 무조건 이 등급입니다. '피난용 승강기'가 없다면 절대 아닙니다.
-    2. **[다중이용건축물]**: 피난용은 없지만, (최고층수≥16층) OR (가목 용도 연멱적 합계≥5,000㎡)인 경우입니다. 둘에 해당하지 않으면 절대 아닙니다.
+    2. **[다중이용건축물]**: 피난용은 없지만, (최고층수≥16층) 또는 (가목 용도 연멱적 합계≥5,000㎡)인 경우에 해당합니다. 둘 중 하나만 해당하거나, 둘 다 해당할 수 있습니다. 둘 다 아니라면 아닙니다.
     3. **[일반건축물]**: 위 다중이용건축물-피난과 다중이용건축물이 해당하지 않는 모든 건물입니다.
 
     [판결 지시사항]
@@ -279,6 +279,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
