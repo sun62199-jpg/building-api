@@ -309,14 +309,18 @@ async function apiSummaryHandler(req, res) {
 
         const gradeCode = llmResult.code;
         let gradeTitle;
-
-        if (llmResult.decision_text.includes("피난")) {
-            gradeTitle = '피난용 엘리베이터 승강기 관리교육(12시간)';
-        } else if (gradeCode === 'RED') {
-            gradeTitle = '비상구출운전 승강기관리교육(12시간)';
-        } else {
-            gradeTitle = '승강기 관리교육(4시간)';
-        }
+        switch (llmResult.decision_text) {
+        case "다중이용건축물-피난":
+        gradeTitle = '피난용 엘리베이터 승강기 관리교육(12시간)';
+        break;
+        case "다중이용건축물":
+        gradeTitle = '비상구출운전 승강기관리교육(12시간)';
+        break;
+        case "일반건축물":
+        default:
+        gradeTitle = '승강기 관리교육(4시간)';
+        break;
+}
 
         const themeColor = gradeCode === 'RED' ? 'blue' : 'green'; 
 
@@ -366,6 +370,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
