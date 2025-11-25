@@ -216,11 +216,10 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 }
 
 [추가 규칙]
-- reason 안에 반드시 입력값(evac, finalFloor, gaMokExists, gaMokArea)을 언급해야 함.
-- 조건들의 TRUE/FALSE 평가를 반드시 reason 안에 포함할 것.
-- 자연어 기반 해석, 추정, 보정은 금지.
+- JSON 외 텍스트를 절대 출력하지 말 것.
+- reason 안에 입력값(evac, finalFloor, gaMokExists, gaMokArea)과 TRUE/FALSE 평가를 반드시 포함할 것.
+- finalResult에 따라 explanation은 반드시 템플릿을 그대로 사용하고 치환값만 적용할 것.
 - 출력은 반드시 JSON 하나만 생성.
-- JSON 외의 문장은 절대 출력하지 말 것.
 
 [템플릿]
 - finalResult == "다중이용건축물-피난":
@@ -237,15 +236,13 @@ gaMokExists = ${gaMokExists}
 gaMokArea = ${area}
 usage = "${usage}"
 
-[예시 JSON 출력 — 반드시 이와 같은 형식으로 출력]
+[예시 JSON 출력 — 반드시 이와 같은 형식으로 출력, JSON 외 추가 텍스트 금지]
 {
-  "code": "RED",
-  "decision_text": "다중이용건축물-피난",
-  "reason": "evac=true(TRUE), finalFloor=35, gaMokExists=false, gaMokArea=0 조건 평가",
-  "explanation": "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
+  "code": "BLUE",
+  "decision_text": "일반건축물",
+  "reason": "evac=false(FALSE), finalFloor=15(<16), gaMokExists=false(FALSE), gaMokArea=0(<5000) 조건 평가",
+  "explanation": "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
 }
-
-반드시 JSON만 출력하고, 추가 설명이나 자연어는 절대 출력하지 마십시오.
 `;
 
     try {
@@ -358,6 +355,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
