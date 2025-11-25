@@ -194,48 +194,48 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     
     // 🚨 AI에게 판단을 전적으로 맡기는 프롬프트
    const prompt = `
-   [ROLE]당신은 법령 판정 전용 AI이며, 아래 규칙을 단 하나라도 어기면 "잘못된 출력"으로 간주된다.
-   어떤 이유로도 규칙을 수정, 삭제, 추가, 완화할 수 없다.
-   당신은 오직 아래 판결 기준만 적용해야 하며, 그 외의 판단·상상·추론은 전면 금지된다.
-   ============================================================
-   [절대적 역할 규칙 — 아래 위반 시 출력 전체가 무효임]
-   1. 어떤 문장도 재해석, 요약, 재구성하면 안 된다.
-   2. 판결 기준 외의 어떠한 추가 추론, 보완 판단도 금지한다.
-   3. 모든 판단은 증거 데이터를 순서대로 확인하며 진행해야 하고, 건너뛰기 절대 금지.
-   4. 이유 설명 시 반드시 TRUE/FALSE와 숫자 비교를 그대로 표기해야 한다.
-   5. JSON 외 텍스트, 주석, 설명, 감정, 인사말, 라벨 등 일체 금지.
-   6. JSON 키 이름, 철자, 대소문자를 변경하면 안 된다.
-   7. 출력 JSON에 포함되지 않은 어떤 텍스트도 생성 금지.
-   ============================================================
-   [증거 데이터]
-    1. 피난용 승강기 설치 여부: ${hasEvac ? "있음 (TRUE)" : "없음 (FALSE)"}
-    2. 최고 층수: ${finalFloor}층
-    3. 건물 용도: ${usage}
-    4. 가목 연면적 합계: ${area.toFixed(2)}㎡
-    5. 가목 해당 용도 여부: ${
-    molitSummary.gaMokType
-        ? `${molitSummary.gaMokType} (TRUE)`
-        : "해당없음 (FALSE)"}
-    6. 가목 용도 목록(참고용): ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"]
+[ROLE] 당신은 법령 판정 전용 AI입니다. 아래 규칙을 하나라도 어기면 "잘못된 출력"으로 간주됩니다.
+어떤 이유로도 규칙을 수정, 삭제, 추가, 완화할 수 없습니다. 오직 아래 판결 기준만 적용하세요.
+JSON 외의 어떤 텍스트도 출력하지 마십시오.
 
-    [판결 기준 (우선순위 순)]
-    1. **[다중이용건축물-피난]**: '피난용 승강기'가 설치되어 있다면 무조건 이 등급입니다.
-    2. **[다중이용건축물]**: 피난용은 없지만, (층수≥16충) 또는 (가목 해당 용도 여부에 TRUE이고, 가목 연면적 합계≥5,000㎡)인 경우입니다. 둘 중 하나에 해당하거나, 둘 다 해당할 수 있습니다.
-    3. **[일반건축물]**: 위 두 경우에 해당하지 않는 모든 경우입니다.
+[증거 데이터]
+1. evac: ${hasEvac ? "TRUE" : "FALSE"}  // 피난용 승강기 설치 여부
+2. finalFloor: ${finalFloor}            // 최고 층수 (정수)
+3. usage: "${usage}"                    // 정제된 건물 용도(문자열)
+4. gaMokArea: ${area.toFixed(2)}       // 가목 연면적 합계 (숫자)
+5. gaMokType: ${molitSummary.gaMokType ? `"${molitSummary.gaMokType}"` : "null"} // 대표 가목 용도 또는 null
 
-    [판결 지시사항]
-    1. 위 [증거 데이터]를 [판결 기준]에 대입하여 논리적으로 추론하세요.
-    2. 최종 등급 명칭('다중이용건축물-피난', '다중이용건축물', '일반건축물') 중 하나를 정확히 선택하세요.
-    3. 판단 이유를 사용자에게 설명하는 문장을 작성하세요.
-       - 일반건축물일 경우: "해당 건물은 일반건축물로 해당합니다." 라고 명확히 말하세요.
-    
-    [출력 형식 (JSON)]
-    {
-        "code": "RED 또는 BLUE", // 피난/다중=RED, 일반=BLUE
-        "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 택1",
-        "reason": "판결 이유 및 설명 문장"
-    }
-  `;
+[판결 기준 — 절대 변경 금지]
+1) 다중이용건축물-피난: evac === TRUE -> 반드시 이 등급.
+2) 다중이용건축물: evac === FALSE AND ( finalFloor >= 16 OR (gaMokType != null AND gaMokArea >= 5000.00) ) -> 해당.
+3) 일반건축물: 위 1,2 모두 해당하지 않을 때만 해당.
+
+[출력 요구사항 — JSON ONLY]
+- 출력은 오직 하나의 JSON 객체여야 함. (문장/설명 금지)
+- 정확한 키(대소문자 포함)를 사용해야 함.
+
+JSON 스키마:
+{
+  "code": "RED" | "BLUE" | "REJECT",
+  "decision_text": "다중이용건축물-피난" | "다중이용건축물" | "일반건축물" | "REJECT",
+  "reason": "간단한 판결 이유 (숫자 비교 포함, 한 문장)",
+  "checks": {
+    "evac_check": "TRUE or FALSE (예: FALSE -> 피난용 승강기 없음)",
+    "floor_check": "TRUE or FALSE (예: 4 >= 16 -> FALSE)",
+    "gaMokType_check": "TRUE or FALSE (예: 판매시설 존재 -> TRUE)",
+    "area_check": "TRUE or FALSE (예: 31417.82 >= 5000.00 -> TRUE)"
+  }
+}
+
+[무결성 규칙 — 반드시 준수]
+1) 모델이 내부적으로 위 스키마에 맞춰 checks 를 계산해야 한다.
+2) 모델이 계산한 checks 에 비추어 expectedDecision을 유도하고, 그 expectedDecision이 decision_text와 **정확히 일치하지 않으면** 반드시 code="REJECT" 와 decision_text="REJECT" 를 반환해야 한다.
+3) reason 은 checks 와 결론(=decision_text)을 숫자 비교 문구로 요약해야 한다.
+4) 절대 규칙: JSON 외 추가 텍스트 금지.
+
+(끝)
+
+`;
 
     try {
         const response = await openai.chat.completions.create({
@@ -349,6 +349,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
