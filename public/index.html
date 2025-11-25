@@ -104,12 +104,15 @@
         };
 
         async function search() {
-            const addr = INPUT.value.trim();
+            let addr = INPUT.value.trim();
             if (!addr) {
                 ERR_TEXT.textContent = "승강기 번호를 입력해주세요.";
                 ERROR.classList.remove('hidden');
                 return;
             }
+
+            // 🚀 입력값에서 "-" 제거
+            addr = addr.replace(/-/g, '');
 
             BTN.disabled = true;
             LOADER.classList.remove('hidden');
@@ -145,7 +148,7 @@
                 
                 const maxConfirmedFloor = Math.max(molitMaxF, elevMaxF);
 
-                // Color Map (V5.5 Final Colors)
+                // Color Map
                 const colorMap = {
                     red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
                     blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
@@ -159,15 +162,11 @@
                 const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
                 const aiDecisionRaw = analysis.llmFinalDecision || '판단불가';
                 let aiDecisionDisplay = aiDecisionRaw;
-                if (aiDecisionRaw === '예') {
-                    aiDecisionDisplay = '다중이용건축물';
-                } else if (aiDecisionRaw === '아니오') {
-                    aiDecisionDisplay = '일반건축물';
-                }
+                if (aiDecisionRaw === '예') aiDecisionDisplay = '다중이용건축물';
+                else if (aiDecisionRaw === '아니오') aiDecisionDisplay = '일반건축물';
 
                 RESULT.innerHTML = `
                     <div class="border-l-4 ${theme.border} pl-4 py-1">
-                        
                         <div class="flex justify-between items-start mb-2">
                             <div>
                                 <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">
@@ -219,27 +218,22 @@
                                 최종 건물 속성 요약
                             </h6>
                             <div class="space-y-1 text-sm text-gray-700">
-                                
                                 <div class="flex justify-between border-b border-gray-100 py-1">
                                     <span class="font-semibold text-gray-800">건물명:</span>
                                     <span>${buildingName}</span>
                                 </div>
-
                                 <div class="flex justify-between border-b border-gray-100 py-1">
                                     <span class="font-semibold text-gray-800">건물 용도:</span>
                                     <span>${buildingUsage}</span>
                                 </div>
-                                
                                 <div class="flex justify-between border-b border-gray-100 py-1">
                                     <span class="font-semibold text-gray-800">최고층수:</span>
                                     <span><b>${maxConfirmedFloor}F</b></span>
                                 </div>
-                                
                                 <div class="flex justify-between border-b border-gray-100 py-1">
                                     <span class="font-semibold text-gray-800">보유대수:</span>
                                     <span>${elevCount}대</span>
                                 </div>
-
                                 <div class="flex justify-between py-1">
                                     <span class="font-semibold text-gray-800">가목 연면적:</span>
                                     <span>${totalAreaSum > 0 ? `<b>${totalAreaSum}㎡</b>` : '조회 불필요'}</span>
