@@ -194,11 +194,11 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const gaMokExists = area > 0;
     const hasEvac = elevatorSummary.hasEvacElevator;
 
-    // ✅ usage 정의
+    // usage 정의
     const rawUsage = baseItem.buldPrpos || '공동주택/기타';
     const usage = rawUsage.split('-')[0].trim(); // "-" 기준 앞부분만 사용
 
-const prompt = `
+    const prompt = `
 당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
 Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다.
 
@@ -216,9 +216,9 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 }
 
 [추가 규칙]
+- reason 안에 입력값(evac, finalFloor, gaMokExists, gaMokArea)과 TRUE/FALSE 평가를 반드시 포함.
+- finalResult에 따라 explanation은 반드시 템플릿 그대로 사용, 치환값({usage}, {reason})은 입력값으로 대체.
 - JSON 외 텍스트를 절대 출력하지 말 것.
-- reason 안에 입력값(evac, finalFloor, gaMokExists, gaMokArea)과 TRUE/FALSE 평가를 반드시 포함할 것.
-- finalResult에 따라 explanation은 반드시 템플릿을 그대로 사용하고 치환값만 적용할 것.
 - 출력은 반드시 JSON 하나만 생성.
 
 [템플릿]
@@ -229,14 +229,14 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 - finalResult == "일반건축물":
   "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
 
-[입력값]
+[입력값 — 반드시 이 값을 사용]
 evac = ${hasEvac}
 finalFloor = ${finalFloor}
 gaMokExists = ${gaMokExists}
 gaMokArea = ${area}
 usage = "${usage}"
 
-[예시 JSON 출력 — 반드시 이와 같은 형식으로 출력, JSON 외 추가 텍스트 금지]
+[예시 JSON — 반드시 이 형식, JSON 외 출력 금지]
 {
   "code": "BLUE",
   "decision_text": "일반건축물",
@@ -254,16 +254,31 @@ usage = "${usage}"
         });
 
         const content = response.choices[0].message.content.trim();
-        const s = content.indexOf('{'), e = content.lastIndexOf('}');
-        if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
-        
-        return { code: "BLUE", decision_text: "일반건축물", reason: "AI 판단 오류로 기본값 적용." };
+
+        // JSON 파싱
+        const jsonStart = content.indexOf('{');
+        const jsonEnd = content.lastIndexOf('}');
+        if (jsonStart !== -1 && jsonEnd !== -1) {
+            const jsonStr = content.substring(jsonStart, jsonEnd + 1);
+            return JSON.parse(jsonStr);
+        }
+
+        // LLM 오류 시 기본값
+        return {
+            code: "BLUE",
+            decision_text: "일반건축물",
+            reason: `evac=${hasEvac}, finalFloor=${finalFloor}, gaMokExists=${gaMokExists}, gaMokArea=${area} 조건 평가`,
+            explanation: "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
+        };
     } catch (err) {
-        return { code: "BLUE", decision_text: "일반건축물", reason: "AI 연결 실패." };
+        return {
+            code: "BLUE",
+            decision_text: "일반건축물",
+            reason: "AI 연결 실패",
+            explanation: "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
+        };
     }
 }
-
-
 
 // ---------------------------------------------------------
 // 9. API 핸들러
@@ -355,8 +370,3 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
-
-
-
-
-
