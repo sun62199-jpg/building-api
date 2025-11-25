@@ -194,47 +194,21 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     
     // 🚨 AI에게 판단을 전적으로 맡기는 프롬프트
    const prompt = `
-[ROLE] 당신은 법령 판정 전용 AI입니다. 아래 규칙을 하나라도 어기면 "잘못된 출력"으로 간주됩니다.
-어떤 이유로도 규칙을 수정, 삭제, 추가, 완화할 수 없습니다. 오직 아래 판결 기준만 적용하세요.
-JSON 외의 어떤 텍스트도 출력하지 마십시오.
+당신은 자연어 추론을 절대 사용하면 안 되고,
+오직 아래 Boolean 규칙만 사용해 판단한다.
 
-[증거 데이터]
-1. evac: ${hasEvac ? "TRUE" : "FALSE"}  // 피난용 승강기 설치 여부
-2. finalFloor: ${finalFloor}            // 최고 층수 (정수)
-3. usage: "${usage}"                    // 정제된 건물 용도(문자열)
-4. gaMokArea: ${area.toFixed(2)}       // 가목 연면적 합계 (숫자)
-5. gaMokType: ${molitSummary.gaMokType ? `"${molitSummary.gaMokType}"` : "null"} // 대표 가목 용도 또는 null
+1. evac == true → "다중이용건축물-피난"
+2. evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000))
+   → "다중이용건축물"
+3. 위 조건에 모두 해당하지 않으면 → "일반건축물"
 
-[판결 기준 — 절대 변경 금지]
-1) 다중이용건축물-피난: evac === TRUE -> 반드시 이 등급.
-2) 다중이용건축물: evac === FALSE AND ( finalFloor >= 16 OR (gaMokType != null AND gaMokArea >= 5000.00) ) -> 해당.
-3) 일반건축물: 위 1,2 모두 해당하지 않을 때만 해당.
+출력은 반드시:
+- evacCondition: true/false
+- floorCondition: true/false
+- gaMokCondition: true/false
+- finalResult: 문자열
 
-[출력 요구사항 — JSON ONLY]
-- 출력은 오직 하나의 JSON 객체여야 함. (문장/설명 금지)
-- 정확한 키(대소문자 포함)를 사용해야 함.
-
-JSON 스키마:
-{
-  "code": "RED" | "BLUE" | "REJECT",
-  "decision_text": "다중이용건축물-피난" | "다중이용건축물" | "일반건축물" | "REJECT",
-  "reason": "간단한 판결 이유 (숫자 비교 포함, 한 문장)",
-  "checks": {
-    "evac_check": "TRUE or FALSE (예: FALSE -> 피난용 승강기 없음)",
-    "floor_check": "TRUE or FALSE (예: 4 >= 16 -> FALSE)",
-    "gaMokType_check": "TRUE or FALSE (예: 판매시설 존재 -> TRUE)",
-    "area_check": "TRUE or FALSE (예: 31417.82 >= 5000.00 -> TRUE)"
-  }
-}
-
-[무결성 규칙 — 반드시 준수]
-1) 모델이 내부적으로 위 스키마에 맞춰 checks 를 계산해야 한다.
-2) 모델이 계산한 checks 에 비추어 expectedDecision을 유도하고, 그 expectedDecision이 decision_text와 **정확히 일치하지 않으면** 반드시 code="REJECT" 와 decision_text="REJECT" 를 반환해야 한다.
-3) reason 은 checks 와 결론(=decision_text)을 숫자 비교 문구로 요약해야 한다.
-4) 절대 규칙: JSON 외 추가 텍스트 금지.
-
-(끝)
-
+추론, 유추, 자연어 판단을 사용하지 않는다.
 `;
 
     try {
@@ -349,6 +323,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
