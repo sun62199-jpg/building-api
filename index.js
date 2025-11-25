@@ -200,34 +200,45 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
 당신은 법적 판정 전용 AI이며 자연어 추론, 연역, 일반적 판단을 절대 사용하면 안 된다.
 오직 아래 Boolean 규칙만을 사용하여 최종 결과를 산출한다.
 
-[판정 규칙]
-1) evac == true
-   → 결과 = "다중이용건축물-피난"
+1. evac == true → "다중이용건축물-피난"
+2. evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000))
+   → "다중이용건축물"
+3. 위 조건에 모두 해당하지 않으면 → "일반건축물"
 
-2) evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000))
-   → 결과 = "다중이용건축물"
+출력 형식은 반드시 아래 JSON 객체 하나만 출력한다:
 
-3) 위 조건 모두 아니면
-   → 결과 = "일반건축물"
-
-[출력 JSON 형식 — 절대 임의로 변경 금지]
 {
-  "code": "RED 또는 BLUE",
-  "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
-  "reason": "판정 이유를 Boolean 비교와 수치 기준을 기반으로 명확하게 기술"
+  "evacCondition": true/false,
+  "floorCondition": true/false,
+  "gaMokCondition": true/false,
+  "finalResult": "문자열",
+  "explanation": "문자열"
 }
 
-[추가 규칙]
-- 조건들의 TRUE/FALSE 평가를 reason 안에 반드시 포함한다.
-- 자연어 기반 해석, 추정, 보정은 금지한다.
-- 출력은 반드시 JSON 하나만 생성한다.
-- JSON 외의 문장은 절대 출력하지 않는다.
+⚠️ explanation은 아래 3가지 템플릿 중 하나만 사용할 수 있다.
+LLM은 절대로 다른 문장을 임의로 생성하면 안 된다.
 
-[입력값]
-evac = ${hasEvac}
-finalFloor = ${finalFloor}
-gaMokExists = ${gaMokExists}
-gaMokArea = ${area}
+---
+
+① finalResult == "다중이용건축물-피난" 일 때:
+explanation = "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
+
+② finalResult == "다중이용건축물" 일 때:
+explanation = "해당 건물의 용도는 {usage}이며, {reason} 이므로 다중이용건축물로 판단됩니다. 비상구출운전 승강기관리교육 이수가 필요합니다."
+
+여기서 reason은 다음 두 가지 중 하나만 가능하다:
+- "{finalFloor}층 이상"
+- "연면적 {gaMokArea}㎡ 이상"
+
+③ finalResult == "일반건축물" 일 때:
+explanation = "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
+
+---
+
+⚠️ 주의:
+- 위 3개의 템플릿 이외의 문장을 생성해선 안 된다.
+- {usage}, {finalFloor}, {gaMokArea}, {reason} 은 서버에서 제공하는 숫자·문자 그대로 치환한다.
+- 템플릿 외 문장, 부연설명, 자연어 추론은 모두 금지한다.
 `;
 
     try {
@@ -340,3 +351,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
