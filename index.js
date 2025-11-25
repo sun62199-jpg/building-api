@@ -333,7 +333,7 @@ async function apiSummaryHandler(req, res) {
                 badgeText: llmResult.decision_text,
                 colorTheme: themeColor,
                 mainTitle: gradeTitle,
-                description: llmResult.reason
+                description: llmResult.explanation
             },
             addressInfo: { roadAddr: baseItem.address2, jibun: baseItem.address1 },
             analysis: {
@@ -370,3 +370,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
