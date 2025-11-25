@@ -197,39 +197,35 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
 
     // 🚨 완전 정상 작동하도록 재작성된 프롬프트 (JSON 구조 맞춤형)
     const prompt = `
-당신은 법적 판정 전용 AI이며 자연어 추론, 연역, 일반적 판단을 절대 사용하면 안 된다.
-오직 아래 Boolean 규칙만을 사용하여 최종 결과를 산출한다.
+당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
+Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다.
 
 [판정 규칙]
-1) evac == true
-   → 결과 = "다중이용건축물-피난"
+1) evac == true → "다중이용건축물-피난"
+2) evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000)) → "다중이용건축물"
+3) 위 조건 모두 아니면 → "일반건축물"
 
-2) evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000))
-   → 결과 = "다중이용건축물"
-
-3) 위 조건 모두 아니면
-   → 결과 = "일반건축물"
-
-[출력 JSON 형식 — 절대 임의로 변경 금지]
+[출력 JSON — 절대 변경 금지]
 {
   "code": "RED 또는 BLUE",
   "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
-  "reason": "판정 이유를 Boolean 비교와 수치 기준을 기반으로 명확하게 기술"
+  "reason": "조건 평가와 입력값(evac, finalFloor, gaMokExists, gaMokArea)을 포함",
+  "explanation": "템플릿 문장을 그대로 사용. 치환값만 입력값으로 대체"
 }
 
 [추가 규칙]
-- 조건들의 TRUE/FALSE 평가를 reason 안에 반드시 포함한다.
-- 자연어 기반 해석, 추정, 보정은 금지한다.
-- 출력은 반드시 JSON 하나만 생성한다.
-- JSON 외의 문장은 절대 출력하지 않는다.
-- reason 안에 반드시 입력값(evac, finalFloor, gaMokExists, gaMokArea) 값을 언급해야 한다.
+- reason 안에 반드시 입력값(evac, finalFloor, gaMokExists, gaMokArea)을 언급해야 함.
+- 조건들의 TRUE/FALSE 평가를 반드시 reason 안에 포함할 것.
+- 자연어 기반 해석, 추정, 보정은 금지.
+- 출력은 반드시 JSON 하나만 생성.
+- JSON 외의 문장은 절대 출력하지 말 것.
 
 [템플릿]
-- finalResult == "다중이용건축물-피난" :
+- finalResult == "다중이용건축물-피난":
   "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
-- finalResult == "다중이용건축물" :
+- finalResult == "다중이용건축물":
   "해당 건물의 용도는 {usage}이며, {reason} 이므로 다중이용건축물로 판단됩니다. 비상구출운전 승강기관리교육 이수가 필요합니다."
-- finalResult == "일반건축물" :
+- finalResult == "일반건축물":
   "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
 
 [입력값]
@@ -237,7 +233,9 @@ evac = ${hasEvac}
 finalFloor = ${finalFloor}
 gaMokExists = ${gaMokExists}
 gaMokArea = ${area}
+usage = "${usage}"
 `;
+
 
     try {
         const response = await openai.chat.completions.create({
@@ -349,4 +347,5 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
