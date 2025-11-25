@@ -192,10 +192,12 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
     const gaMokExists = area > 0;
-
     const hasEvac = elevatorSummary.hasEvacElevator;
 
-    // 🚨 완전 정상 작동하도록 재작성된 프롬프트 (JSON 구조 맞춤형)
+    // ✅ usage 정의
+    const rawUsage = baseItem.buldPrpos || '공동주택/기타';
+    const usage = rawUsage.split('-')[0].trim(); // "-" 기준 앞부분만 사용
+
     const prompt = `
 당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
 Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다.
@@ -235,7 +237,6 @@ gaMokExists = ${gaMokExists}
 gaMokArea = ${area}
 usage = "${usage}"
 `;
-
 
     try {
         const response = await openai.chat.completions.create({
@@ -347,5 +348,6 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
