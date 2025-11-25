@@ -40,16 +40,16 @@
             </h1>
             <p class="text-gray-500 font-bold mt-1 text-sm">김영선</p>
             <p class="text-gray-600 text-sm sm:text-base mt-2">
-                승강기 번호로 교육 안내를 확인하세요.
+                건물 주소로 법정 의무교육을 확인하세요.
             </p>
         </header>
 
         <section class="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
             <label class="block text-md font-semibold text-gray-700 mb-3">
-                승강기 번호 입력
+                건물 주소 입력
             </label>
             <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
-                <input type="text" id="addressInput" placeholder="예: 2002377" 
+                <input type="text" id="addressInput" placeholder="예: 2002377 (승강기 번호)" 
                        class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-sm focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm">
                 <button id="checkButton"
                         class="px-5 py-3 bg-primary text-white font-bold rounded-lg hover:bg-secondary transition duration-300 shadow-md disabled:opacity-50 text-sm whitespace-nowrap">
@@ -84,7 +84,7 @@
         <section class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200 text-xs">
              <h3 class="font-semibold text-primary mb-2">💡 이용 안내</h3>
              <ul class="list-disc list-inside text-gray-600 space-y-1">
-                 <li>승강기 정보를 기반으로 LLM AI 판단 후 안내사항을 제공합니다.</li>
+                 <li>건축물대장과 승강기 정보를 교차 분석하여 안내합니다.</li>
                  <li>데이터 불일치 시 현장 확인이 필요할 수 있습니다.</li>
              </ul>
          </section>
@@ -97,6 +97,11 @@
         const ERROR = document.getElementById('errorMessage');
         const ERR_TEXT = document.getElementById('errorText');
         const LOADER = document.getElementById('loadingIndicator');
+
+        window.toggleJson = function() {
+            const viewer = document.getElementById('jsonViewer');
+            viewer.classList.toggle('hidden');
+        };
 
         async function search() {
             const addr = INPUT.value.trim();
@@ -114,31 +119,156 @@
 
             try {
                 const res = await fetch('/api/summary', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ addr })
                 });
-                const json = await res.json();
+                
+                const json = await responseJsonSafe(res);
 
                 if (!res.ok || json.error) {
-                    throw new Error(json.detail || json.error || '서버 오류');
+                    throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // LLM 판단 기반 안내사항
-                const gradeTitle = json.uiRender?.mainTitle || "승강기 관리교육(4시간)";
-                const explanation = json.uiRender?.description || "";
-                const decisionText = json.analysis?.llmFinalDecision || "판단불가";
+                // 🚨 Server-Driven Data
+                const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
+                    uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
+                };
+                
+                // 데이터 변수 안전 초기화
+                const molitMaxF = summaryDetails.최고지상층수 || 0;
+                const elevMaxF = summaryDetails.elevatorMaxFloor || 0; 
+                const totalAreaSum = summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
+                const elevCount = summaryDetails.elevatorCount || 0;
+                
+                const buildingName = raw?.baseElevatorItem?.buldNm || '이름 없음';
+                const buildingUsage = summaryDetails.buldPrpos || summaryDetails.gaMokType || '정보 없음';
+                
+                const maxConfirmedFloor = Math.max(molitMaxF, elevMaxF);
+
+                // Color Map (V5.5 Final Colors)
+                const colorMap = {
+                    red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
+                    blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
+                    yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
+                    gray: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' }
+                };
+                const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
+
+                const ruleCode = analysis.ruleBased; 
+                const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
+                const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
+                const aiDecisionRaw = analysis.llmFinalDecision || '판단불가';
+                let aiDecisionDisplay = aiDecisionRaw;
+                if (aiDecisionRaw === '예') {
+                    aiDecisionDisplay = '다중이용건축물';
+                } else if (aiDecisionRaw === '아니오') {
+                    aiDecisionDisplay = '일반건축물';
+                }
 
                 RESULT.innerHTML = `
-                    <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <p class="text-xs text-gray-500 mb-1 font-bold">💡 안내사항 (LLM 판단)</p>
-                        <p class="text-lg font-extrabold text-primary mb-2">${gradeTitle}</p>
-                        <p class="text-sm text-gray-700">${explanation}</p>
-                        <p class="text-xs text-gray-400 mt-1">판단 결과: ${decisionText}</p>
+                    <div class="border-l-4 ${theme.border} pl-4 py-1">
+                        
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">
+                                    ${uiRender.badgeText}
+                                </span>
+                                <p class="text-sm text-gray-700 font-bold leading-tight">
+                                    ${addressInfo.jibun || data.address || '주소 정보 없음'}
+                                </p>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
+                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
+                            <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
+                                ${uiRender.mainTitle}
+                            </p>
+                        </div>
+
+                        <div class="space-y-2">
+                            <div class="p-3 rounded-lg border border-gray-200 bg-white flex justify-between items-center">
+                                <div>
+                                    <p class="text-xs font-bold text-gray-600 mb-1 flex items-center">
+                                        🏛️ 건축법 규정 판단 (System)
+                                    </p>
+                                    <p class="text-sm font-bold text-gray-800">
+                                        ${ruleIcon} ${ruleText}
+                                    </p>
+                                </div>
+                                <div class="text-2xl">${ruleIcon}</div>
+                            </div>
+
+                            <div class="p-3 rounded-lg border border-yellow-500 bg-yellow-50 flex justify-between items-center">
+                                <div>
+                                    <p class="text-xs font-bold text-yellow-800 mb-1 flex items-center">
+                                        🧠 AI 판단
+                                    </p>
+                                    <p class="text-sm font-bold text-yellow-900">
+                                        ${aiDecisionDisplay}
+                                    </p>
+                                </div>
+                                <span class="text-sm px-2 py-1 rounded bg-yellow-200 border border-yellow-400 text-yellow-700 font-bold">
+                                    ${aiDecisionDisplay}
+                                </span>
+                            </div>
+
+                            <div class="p-3 rounded-lg border ${theme.border} ${theme.ruleBg}">
+                                <div class="flex justify-between items-center mb-1">
+                                    <p class="text-xs font-bold ${theme.ruleText} flex items-center">
+                                        🤖 AI 종합 분석 (LLM)
+                                    </p>
+                                </div>
+                                <p class="text-xs text-gray-700 leading-relaxed text-justify">
+                                    ${uiRender.description}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4 mt-4">
+                            <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center">
+                                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                                최종 건물 속성 요약
+                            </h6>
+                            <div class="space-y-1 text-sm text-gray-700">
+                                
+                                <div class="flex justify-between border-b border-gray-100 py-1">
+                                    <span class="font-semibold text-gray-800">건물명:</span>
+                                    <span>${buildingName}</span>
+                                </div>
+
+                                <div class="flex justify-between border-b border-gray-100 py-1">
+                                    <span class="font-semibold text-gray-800">건물 용도:</span>
+                                    <span>${buildingUsage}</span>
+                                </div>
+                                
+                                <div class="flex justify-between border-b border-gray-100 py-1">
+                                    <span class="font-semibold text-gray-800">최고층수:</span>
+                                    <span><b>${maxConfirmedFloor}F</b></span>
+                                </div>
+                                
+                                <div class="flex justify-between border-b border-gray-100 py-1">
+                                    <span class="font-semibold text-gray-800">보유대수:</span>
+                                    <span>${elevCount}대</span>
+                                </div>
+
+                                <div class="flex justify-between py-1">
+                                    <span class="font-semibold text-gray-800">가목 연면적:</span>
+                                    <span>${totalAreaSum > 0 ? `<b>${totalAreaSum}㎡</b>` : '조회 불필요'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3 text-right">
+                            <button onclick="toggleJson()" class="text-xs text-gray-400 hover:text-blue-600 underline transition">
+                                상세 데이터 원본 보기
+                            </button>
+                        </div>
+                        <div id="jsonViewer" class="json-viewer hidden mt-2">${JSON.stringify(summaryDetails, null, 2)}</div>
                     </div>
                 `;
-
                 RESULT.classList.remove('hidden');
+
             } catch (e) {
                 ERR_TEXT.textContent = e.message;
                 ERROR.classList.remove('hidden');
@@ -146,6 +276,12 @@
                 LOADER.classList.add('hidden');
                 BTN.disabled = false;
             }
+        }
+
+        async function responseJsonSafe(res) {
+            const text = await res.text();
+            try { return JSON.parse(text); } 
+            catch { return { error: '서버 응답 형식 오류', detail: text.substring(0, 100) }; }
         }
 
         BTN.addEventListener('click', search);
