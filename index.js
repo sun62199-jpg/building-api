@@ -239,7 +239,7 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
 
     try {
         const response = await openai.chat.completions.create({
-            model: "gpt-3.5-turbo",
+            model: "gpt-4.1-mini",
             messages: [{ role: "user", content: prompt }],
             temperature: 0.0, 
             max_tokens: 400,
@@ -349,6 +349,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
