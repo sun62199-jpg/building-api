@@ -166,80 +166,61 @@
                 else if (aiDecisionRaw === '아니오') aiDecisionDisplay = '일반건축물';
 
                 RESULT.innerHTML = `
-                    <div class="border-l-4 ${theme.border} pl-4 py-1">
-                        <div class="flex justify-between items-start mb-2">
-                            <div>
-                                <span class="px-2 py-0.5 ${theme.bg} ${theme.text} text-xs font-bold rounded mb-1 inline-block">
-                                    ${uiRender.badgeText}
-                                </span>
-                                <p class="text-sm text-gray-700 font-bold leading-tight">
-                                    ${addressInfo.jibun || data.address || '주소 정보 없음'}
-                                </p>
-                            </div>
-                        </div>
-                        
-                        <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
-                            <p class="text-xs text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
-                            <p class="font-extrabold ${theme.title} text-lg leading-snug break-keep">
-                                ${uiRender.mainTitle}
-                            </p>
-                        </div>
+    <div class="border-l-4 ${theme.border} pl-4 py-1">
 
-                        <div class="space-y-2">
-                            <div class="p-3 rounded-lg border border-yellow-500 bg-yellow-50 flex justify-between items-center">
-                                <div>
-                                    <p class="text-xs font-bold text-yellow-800 mb-1 flex items-center">
-                                        🧠 AI 판단
-                                    </p>
-                                    <p class="text-sm font-bold text-yellow-900">
-                                        ${aiDecisionDisplay}
-                                    </p>
-                                </div>
-                                <span class="text-sm px-2 py-1 rounded bg-yellow-200 border border-yellow-400 text-yellow-700 font-bold">
-                                    ${aiDecisionDisplay}
-                                </span>
-                            </div>
+        <!-- AI 판단 (가장 상단 + 크게) -->
+        <div class="p-3 rounded-lg border-2 border-yellow-500 bg-yellow-50 mb-4">
+            <p class="text-xs font-bold text-yellow-800 mb-1">🧠 AI 판단 결과</p>
+            <p class="text-xl font-extrabold text-yellow-900 leading-tight">
+                ${aiDecisionDisplay}
+            </p>
+        </div>
 
-                            <div class="p-3 rounded-lg border ${theme.border} ${theme.ruleBg}">
-                                <div class="flex justify-between items-center mb-1">
-                                    <p class="text-xs font-bold ${theme.ruleText} flex items-center">
-                                        🤖 AI 종합 분석 (LLM)
-                                    </p>
-                                </div>
-                                <p class="text-xs text-gray-700 leading-relaxed text-justify">
-                                    ${uiRender.description}
-                                </p>
-                            </div>
-                        </div>
+        <!-- AI 종합 분석 -->
+        <div class="p-3 rounded-lg border ${theme.border} ${theme.ruleBg} mb-4">
+            <p class="text-xs font-bold ${theme.ruleText} mb-2">🤖 AI 종합 분석 (LLM)</p>
+            <p class="text-xs text-gray-700 leading-relaxed">
+                ${uiRender.description}
+            </p>
+        </div>
 
-                        <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4 mt-4">
-                            <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center">
-                                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                                최종 건물 속성 요약
-                            </h6>
-                            <div class="space-y-1 text-sm text-gray-700">
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">건물명:</span>
-                                    <span>${buildingName}</span>
-                                </div>
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">건물 용도:</span>
-                                    <span>${buildingUsage}</span>
-                                </div>
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">최고층수:</span>
-                                    <span><b>${maxConfirmedFloor}F</b></span>
-                                </div>
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">보유대수:</span>
-                                    <span>${elevCount}대</span>
-                                </div>
-                                <div class="flex justify-between py-1">
-                                    <span class="font-semibold text-gray-800">가목 연면적:</span>
-                                    <span>${totalAreaSum > 0 ? `<b>${totalAreaSum}㎡</b>` : '조회 불필요'}</span>
-                                </div>
-                            </div>
-                        </div>
+        <!-- 안내 사항 (조금 작게) -->
+        <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
+            <p class="text-[10px] text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
+            <p class="font-bold ${theme.title} text-sm leading-snug break-keep">
+                ${uiRender.mainTitle}
+            </p>
+        </div>
+
+        <!-- 하단 요약 -->
+        <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4 mt-4">
+            <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center">
+                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                최종 건물 속성 요약
+            </h6>
+            <div class="space-y-1 text-sm text-gray-700">
+                <div class="flex justify-between border-b border-gray-100 py-1">
+                    <span class="font-semibold text-gray-800">건물명:</span>
+                    <span>${buildingName}</span>
+                </div>
+                <div class="flex justify-between border-b border-gray-100 py-1">
+                    <span class="font-semibold text-gray-800">건물 용도:</span>
+                    <span>${buildingUsage}</span>
+                </div>
+                <div class="flex justify-between border-b border-gray-100 py-1">
+                    <span class="font-semibold text-gray-800">최고층수:</span>
+                    <span><b>${maxConfirmedFloor}F</b></span>
+                </div>
+                <div class="flex justify-between border-b border-gray-100 py-1">
+                    <span class="font-semibold text-gray-800">보유대수:</span>
+                    <span>${elevCount}대</span>
+                </div>
+                <div class="flex justify-between py-1">
+                    <span class="font-semibold text-gray-800">가목 연면적:</span>
+                    <span>${totalAreaSum > 0 ? `<b>${totalAreaSum}㎡</b>` : '조회 불필요'}</span>
+                </div>
+            </div>
+        </div>
                         
                         <div class="mt-3 text-right">
                             <button onclick="toggleJson()" class="text-xs text-gray-400 hover:text-blue-600 underline transition">
