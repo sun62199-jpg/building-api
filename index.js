@@ -211,7 +211,7 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 {
   "code": "RED 또는 BLUE",
   "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
-  "reason": "조건 평가와 입력값(evac, finalFloor, gaMokExists, gaMokArea)을 포함",
+  "reason": "조건 평가를 보기 좋은 한글 문장으로 작성, 영어/기호 사용 금지. 예: '피난용 엘리베이터 없음, 최고층수 25층, 가목 시설 없음' ",
   "explanation": "템플릿 문장을 그대로 사용. 치환값만 입력값으로 대체"
 }
 
@@ -370,4 +370,5 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
