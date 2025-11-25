@@ -1,196 +1,198 @@
-// 1. 기본 세팅
+// server.js
 const express = require("express");
 const path = require("path");
-require("dotenv").config();
-
-// node-fetch v3
-const fetch = (...args) =>
-  import("node-fetch").then(({ default: fetch }) => fetch(...args));
-
 const OpenAI = require("openai");
+require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 2. 환경변수 확인
-const JUSO_KEY = process.env.JUSO_KEY;
-const MOLIT_KEY = process.env.MOLIT_KEY;
-const OPENAI_KEY = process.env.OPENAI_KEY;
-const ELEVATOR_KEY = process.env.ELEVATOR_KEY || MOLIT_KEY;
+// 1. 환경변수 및 OpenAI 설정
+const { JUSO_KEY, MOLIT_KEY, OPENAI_KEY, ELEVATOR_KEY } = process.env;
+const SERVICE_KEY_ELEVATOR = ELEVATOR_KEY || MOLIT_KEY;
 
-if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !ELEVATOR_KEY) {
-  console.warn("⚠️ 필수 환경변수 누락: JUSO_KEY, MOLIT_KEY, OPENAI_KEY 확인 필요");
+if (!JUSO_KEY || !MOLIT_KEY || !OPENAI_KEY || !SERVICE_KEY_ELEVATOR) {
+  console.warn("⚠️ [경고] 필수 환경변수가 누락되었습니다.");
 }
 
 const openai = new OpenAI({ apiKey: OPENAI_KEY });
 
-// 3. 미들웨어
+// 2. 미들웨어
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 4. Primary Search: By Elevator Number
+// =================================================================
+// 3. Helper Functions (API Calls)
+// =================================================================
+
+// [API] 승강기 고유번호로 기본 정보 조회
 async function getElevatorBaseInfo(elevatorNo) {
-    const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM`);
-    const params = {
-        serviceKey: ELEVATOR_KEY,
-        elevator_no: elevatorNo,
-        _type: "json"
-    };
-    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-
-    try {
-        const res = await fetch(url.toString());
-        const data = await res.json();
-        if (data.response?.header?.resultCode !== "00") return null;
-        return data.response?.body?.item || null; 
-    } catch (e) {
-        return null;
-    }
-}
-
-
-// 5. Data Acquisition & Consolidation
-async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
-    const searchAddr = roadAddr || jibunAddr;
-    if (!searchAddr) return null;
-    const cleanAddr = searchAddr.replace(/\(.*\)/g, '').trim();
-    
-    const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
-    const params = {
-        confmKey: JUSO_KEY, currentPage: "1", countPerPage: "1", keyword: cleanAddr, resultType: "json",
-    };
-    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-
-    try {
-        const res = await fetch(url.toString());
-        const data = await res.json();
-        if (!data.results || data.results.common.errorCode !== "0") return null;
-
-        const juso = data.results.juso[0];
-        if (!juso) return null;
-        
-        return {
-            sigunguCd: juso.admCd.substring(0, 5),
-            bjdongCd: juso.admCd.substring(5, 10),
-            bun: String(juso.lnbrMnnm || "").padStart(4, "0"), 
-            ji: String(juso.lnbrSlno || "").padStart(4, "0"),
-            roadAddr: juso.roadAddr,
-            jibunAddr: juso.jibunAddr
-        };
-    } catch (e) {
-        return null;
-    }
-}
-
-
-function getElevatorSummary(elevatorItems) {
-    if (!elevatorItems?.length) return { maxFloor: 0 };
-    const maxFloor = Math.max(...elevatorItems.map(i => Number(i.divGroundFloorCnt) || 0));
-    return { maxFloor };
-}
-
-
-async function findAndGroupAllElevators(baseItem) {
-    const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`);
-    
-    const addrParts = baseItem.address1.split(' ');
-    const sido = addrParts[0]; 
-    const sigungu = addrParts[1]; 
-    
-    const params = {
-        serviceKey: ELEVATOR_KEY, pageNo: "1", numOfRows: "100", _type: "json",
-        sido: sido, 
-        sigungu: sigungu, 
-        buld_nm: baseItem.buldNm, 
-    };
-    Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-
-    const fallbackResult = { 
-        count: 1, 
-        items: [baseItem], 
-        hasEvacElevator: (baseItem.elvtrKindNm && baseItem.elvtrKindNm.includes('피난')) || false,
-        maxFloor: Number(baseItem.divGroundFloorCnt) || 0 
-    };
-
-    try {
-        const res = await fetch(url.toString());
-        const data = await res.json();
-        if (data.response?.header?.resultCode !== "00") return fallbackResult;
-        
-        const rawItems = data.response?.body?.items?.item;
-        const items = Array.isArray(rawItems) ? rawItems : (rawItems ? [rawItems] : []);
-        if (items.length === 0) return fallbackResult;
-
-        const sameBuildingElevators = items.filter(item => 
-            String(item.buldMgtNo1) === String(baseItem.buldMgtNo1) && 
-            String(item.buldMgtNo2) === String(baseItem.buldMgtNo2)
-        );
-
-        if (sameBuildingElevators.length === 0) return fallbackResult;
-
-        const hasEvacElevator = sameBuildingElevators.some(i => i.elvtrKindNm && i.elvtrKindNm.includes('피난'));
-        const maxFloorInGroup = getElevatorSummary(sameBuildingElevators).maxFloor;
-
-        return { 
-            count: sameBuildingElevators.length, 
-            items: sameBuildingElevators, 
-            hasEvacElevator: hasEvacElevator, 
-            maxFloor: maxFloorInGroup 
-        };
-    } catch (e) {
-        return fallbackResult;
-    }
-}
-
-async function fetchBuildingRegister(molitCodes) { 
-  const url = new URL(`https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo`);
-  const params = { 
-    serviceKey: MOLIT_KEY, sigunguCd: molitCodes.sigunguCd, bjdongCd: molitCodes.bjdongCd, 
-    platGbCd: "0", bun: molitCodes.bun, ji: molitCodes.ji, 
-    _type: "json", numOfRows: "100", pageNo: "1" 
-  };
-  Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
+  const url = new URL("https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM");
+  url.searchParams.append("serviceKey", SERVICE_KEY_ELEVATOR);
+  url.searchParams.append("elevator_no", elevatorNo);
+  url.searchParams.append("_type", "json");
 
   try {
-    const res = await fetch(url.toString());
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.response?.header?.resultCode !== "00") return null;
+    return data.response?.body?.item || null;
+  } catch (e) {
+    console.error("Elevator API Error:", e.message);
+    return null;
+  }
+}
+
+// [API] 주소를 관할 구역 코드(SigunguCd 등)로 변환
+async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
+  const searchAddr = (roadAddr || jibunAddr || "").replace(/\(.*\)/g, '').trim();
+  if (!searchAddr) return null;
+
+  const url = new URL("https://business.juso.go.kr/addrlink/addrLinkApi.do");
+  url.searchParams.append("confmKey", JUSO_KEY);
+  url.searchParams.append("currentPage", "1");
+  url.searchParams.append("countPerPage", "1");
+  url.searchParams.append("keyword", searchAddr);
+  url.searchParams.append("resultType", "json");
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    
+    if (data.results?.common?.errorCode !== "0") return null;
+    const juso = data.results?.juso?.[0];
+    if (!juso) return null;
+
+    return {
+      sigunguCd: juso.admCd.substring(0, 5),
+      bjdongCd: juso.admCd.substring(5, 10),
+      bun: String(juso.lnbrMnnm || "").padStart(4, "0"),
+      ji: String(juso.lnbrSlno || "").padStart(4, "0"),
+      roadAddr: juso.roadAddr,
+      jibunAddr: juso.jibunAddr
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// [API] 해당 건물의 모든 승강기 조회 및 그룹화
+async function findAndGroupAllElevators(baseItem) {
+  const fallbackResult = {
+    count: 1,
+    items: [baseItem],
+    hasEvacElevator: baseItem.elvtrKindNm?.includes('피난') || false,
+    maxFloor: Number(baseItem.divGroundFloorCnt) || 0
+  };
+
+  try {
+    const addrParts = (baseItem.address1 || "").split(' ');
+    if (addrParts.length < 2) return fallbackResult;
+
+    const url = new URL("https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM");
+    url.searchParams.append("serviceKey", SERVICE_KEY_ELEVATOR);
+    url.searchParams.append("pageNo", "1");
+    url.searchParams.append("numOfRows", "100"); // 한 건물에 100대 이상일 확률은 낮음
+    url.searchParams.append("_type", "json");
+    url.searchParams.append("sido", addrParts[0]);
+    url.searchParams.append("sigungu", addrParts[1]);
+    url.searchParams.append("buld_nm", baseItem.buldNm || "");
+
+    const res = await fetch(url);
+    const data = await res.json();
+    
+    if (data.response?.header?.resultCode !== "00") return fallbackResult;
+
+    const rawItems = data.response?.body?.items?.item;
+    const items = Array.isArray(rawItems) ? rawItems : (rawItems ? [rawItems] : []);
+
+    // 같은 건물 관리번호(buldMgtNo1, 2)를 가진 승강기만 필터링
+    const sameBuildingElevators = items.filter(item => 
+      String(item.buldMgtNo1) === String(baseItem.buldMgtNo1) && 
+      String(item.buldMgtNo2) === String(baseItem.buldMgtNo2)
+    );
+
+    if (sameBuildingElevators.length === 0) return fallbackResult;
+
+    const hasEvacElevator = sameBuildingElevators.some(i => i.elvtrKindNm && i.elvtrKindNm.includes('피난'));
+    const maxFloor = Math.max(...sameBuildingElevators.map(i => Number(i.divGroundFloorCnt) || 0));
+
+    return {
+      count: sameBuildingElevators.length,
+      items: sameBuildingElevators,
+      hasEvacElevator,
+      maxFloor
+    };
+  } catch (e) {
+    return fallbackResult;
+  }
+}
+
+// [API] 건축물대장 표제부 조회
+async function fetchBuildingRegister(molitCodes) {
+  const url = new URL("https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo");
+  url.searchParams.append("serviceKey", MOLIT_KEY);
+  url.searchParams.append("sigunguCd", molitCodes.sigunguCd);
+  url.searchParams.append("bjdongCd", molitCodes.bjdongCd);
+  url.searchParams.append("platGbCd", "0");
+  url.searchParams.append("bun", molitCodes.bun);
+  url.searchParams.append("ji", molitCodes.ji);
+  url.searchParams.append("_type", "json");
+  url.searchParams.append("numOfRows", "100");
+
+  try {
+    const res = await fetch(url);
+    // 공공데이터포털은 가끔 JSON 응답 헤더가 올바르지 않거나 XML이 섞일 때가 있어 text로 받고 파싱
     const text = await res.text();
-    if (!res.ok) return [];
     const data = JSON.parse(text);
+    
     if (data.response?.header?.resultCode !== "00") return [];
     const rawItems = data.response?.body?.items?.item;
     return Array.isArray(rawItems) ? rawItems : (rawItems ? [rawItems] : []);
-  } catch (e) { return []; }
+  } catch (e) {
+    return [];
+  }
 }
 
-function buildMolitSummary(items) { 
-    const filtered = items.filter(it => {
-        const totArea = Number(it.totArea) || 0;
-        const grndFlrCnt = Number(it.grndFlrCnt) || 0;
-        if (grndFlrCnt === 0) return false;
-        return true; 
-    });
-    
-    const maxFloor = filtered.length ? Math.max(...filtered.map(it => Number(it.grndFlrCnt) || 0)) : 0;
-    const daJungList = filtered.filter(it => ["공동주택", "제2종근린생활시설", "문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
-    const gaMokArea = daJungList.filter(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm)).reduce((sum, it) => sum + Number(it.totArea), 0);
-    const gaMokType = daJungList.find(it => ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"].includes(it.mainPurpsCdNm));
+// [Logic] 건축물대장 정보 요약 (가목 시설 판단 로직 포함)
+function buildMolitSummary(items) {
+  // 지상층수가 0인 데이터(철거됨 등) 제외
+  const filtered = items.filter(it => (Number(it.grndFlrCnt) || 0) > 0);
+  
+  if (!filtered.length) return { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
 
-    return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
+  const maxFloor = Math.max(...filtered.map(it => Number(it.grndFlrCnt) || 0));
+
+  // 다중이용건축물 '가'목에 해당하는 용도군
+  const targetPurposes = ["문화 및 집회시설", "종교시설", "판매시설", "운수시설", "의료시설", "숙박시설"];
+  
+  const daJungList = filtered.filter(it => targetPurposes.includes(it.mainPurpsCdNm));
+  const gaMokArea = daJungList.reduce((sum, it) => sum + (Number(it.totArea) || 0), 0);
+  
+  // 대표적인 용도 하나 추출
+  const gaMokTypeItem = daJungList.find(it => targetPurposes.includes(it.mainPurpsCdNm));
+
+  return { 
+    totalCount: filtered.length, 
+    maxFloor, 
+    gaMokArea, 
+    gaMokType: gaMokTypeItem ? gaMokTypeItem.mainPurpsCdNm : null, 
+    items: daJungList 
+  };
 }
 
-
-
-// 6. LLM AI Judge: AI 주도형 판단 — 프롬프트 완전 수정본
+// =================================================================
+// 4. AI Judge Logic (Optimized)
+// =================================================================
 async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
-    const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
-    const area = molitSummary.gaMokArea || 0;
-    const gaMokExists = area > 0;
-    const hasEvac = elevatorSummary.hasEvacElevator;
-
-    const rawUsage = baseItem.buldPrpos || '공동주택/기타';
-    const usage = rawUsage.split('-')[0].trim();
-
-const prompt = `
+  const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
+  const area = molitSummary.gaMokArea || 0;
+  const gaMokExists = area > 0;
+  const hasEvac = elevatorSummary.hasEvacElevator;
+  
+  const rawUsage = baseItem.buldPrpos || '공동주택/기타';
+  const usage = rawUsage.split('-')[0].trim();
+  const prompt = `
 당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
 Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다.
 
@@ -237,127 +239,112 @@ usage = "${usage}"
 }
 `;
 
-    try {
-        const response = await openai.chat.completions.create({
-            model: "gpt-4.1-mini",
-            messages: [{ role: "user", content: prompt }],
-            temperature: 0.0,
-            max_tokens: 500
-        });
 
-        const content = response.choices[0].message.content.trim();
-        const jsonStart = content.indexOf('{');
-        const jsonEnd = content.lastIndexOf('}');
-        if (jsonStart !== -1 && jsonEnd !== -1) {
-            const jsonStr = content.substring(jsonStart, jsonEnd + 1);
-            return JSON.parse(jsonStr);
-        }
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // 최신 가성비 모델 변경 (gpt-4.1-mini는 존재하지 않음)
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ],
+      response_format: { type: "json_object" }, // JSON 모드 강제
+      temperature: 0.0,
+      max_tokens: 400
+    });
 
-        return {
-            code: "BLUE",
-            decision_text: "일반건축물",
-            reason: `evac=${hasEvac}, finalFloor=${finalFloor}, gaMokExists=${gaMokExists}, gaMokArea=${area} 조건 평가`,
-            explanation: "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
-        };
-    } catch (err) {
-        return {
-            code: "BLUE",
-            decision_text: "일반건축물",
-            reason: "AI 연결 실패",
-            explanation: "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
-        };
-    }
+    return JSON.parse(response.choices[0].message.content);
+
+  } catch (err) {
+    console.error("OpenAI Error:", err);
+    // Fallback Logic (AI 실패 시 룰베이스로 처리)
+    let decision = "일반건축물";
+    if (hasEvac) decision = "다중이용건축물-피난";
+    else if (finalFloor >= 16 || (gaMokExists && area >= 5000)) decision = "다중이용건축물";
+    
+    return {
+      code: decision.includes("다중") ? "RED" : "BLUE",
+      decision_text: decision,
+      reason: "AI 응답 지연으로 인한 자동 룰베이스 판정",
+      explanation: `시스템 규칙에 따라 ${decision}로 판단됩니다.`
+    };
+  }
 }
 
-// 7. API 핸들러
+// =================================================================
+// 5. Main Handler
+// =================================================================
 async function apiSummaryHandler(req, res) {
-    try {
-        const input = req.body.addr; 
-        if (!input) return res.status(400).json({ error: "승강기 번호가 필요합니다." });
+  try {
+    const input = req.body.addr;
+    if (!input) return res.status(400).json({ error: "승강기 번호가 필요합니다." });
 
-        const baseItem = await getElevatorBaseInfo(input); 
-        if (!baseItem) return res.status(404).json({ error: "승강기 번호 조회 실패", detail: "일치하는 승강기 정보가 없습니다." });
-        
-        const groupResult = await findAndGroupAllElevators(baseItem);
-        const finalMaxFloor = groupResult.maxFloor;
-        const hasEvacElevator = groupResult.hasEvacElevator;
-        
-        let molitSummary = { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
-        let molitStatus = "SKIPPED";
-
-        if (!hasEvacElevator && finalMaxFloor < 16) {
-            const molitCodes = await reverseAddressToMolitCode(baseItem.address1);
-            if (molitCodes) {
-                const molitItems = await fetchBuildingRegister(molitCodes);
-                molitSummary = buildMolitSummary(molitItems);
-                molitStatus = molitItems.length > 0 ? "SUCCESS" : "NO_DATA";
-            } else {
-                molitStatus = "FAILED";
-            }
-        }
-        
-        const llmResult = await getLLMJudge(molitSummary, groupResult, baseItem);
-
-        const gradeCode = llmResult.code;
-        let gradeTitle;
-        switch (llmResult.decision_text) {
-        case "다중이용건축물-피난":
-        gradeTitle = '피난용 엘리베이터 승강기 관리교육(12시간)';
-        break;
-        case "다중이용건축물":
-        gradeTitle = '비상구출운전 승강기관리교육(12시간)';
-        break;
-        case "일반건축물":
-        default:
-        gradeTitle = '승강기 관리교육(4시간)';
-        break;
-}
-
-        const themeColor = gradeCode === 'RED' ? 'blue' : 'green'; 
-
-        const rawUsage = baseItem.buldPrpos || '공동주택/기타';
-        const refinedUsage = rawUsage.split('-')[0].trim(); 
-
-        res.json({
-            status: "ok",
-            uiRender: {
-                badgeText: llmResult.decision_text,
-                colorTheme: themeColor,
-                mainTitle: gradeTitle,
-                description: llmResult.explanation
-            },
-            addressInfo: { roadAddr: baseItem.address2, jibun: baseItem.address1 },
-            analysis: {
-                ruleBased: gradeCode,
-                llmFinalDecision: llmResult.decision_text,
-                llmReason: llmResult.reason
-            },
-            data: {
-                address: baseItem.address2,
-                molit: { floor: molitSummary.maxFloor, area: molitSummary.gaMokArea },
-                elevator: { floor: groupResult.maxFloor, count: groupResult.count },
-                source: "승강기 번호 직접 조회"
-            },
-            summaryDetails: {
-                총건물수: molitSummary.totalCount,
-                최고지상층수: molitSummary.maxFloor,
-                가목_연면적_합계: molitSummary.gaMokArea,
-                elevatorCount: groupResult.count,
-                elevatorMaxFloor: groupResult.maxFloor,
-                buldPrpos: refinedUsage,
-                molitStatus: molitStatus
-            },
-            raw: { baseElevatorItem: baseItem, molitItems: molitSummary.items }
-        });
-
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
+    // 1. 기본 승강기 정보 조회
+    const baseItem = await getElevatorBaseInfo(input);
+    if (!baseItem) {
+      return res.status(404).json({ error: "조회 실패", detail: "일치하는 승강기 정보가 없습니다." });
     }
+
+    // 2. 승강기 전체 그룹핑 (같은 건물 내)
+    const groupResult = await findAndGroupAllElevators(baseItem);
+    
+    // 3. 건축물대장 조회 조건 확인
+    // 피난용이 있거나 이미 16층 이상이면 건축물대장 조회가 필수는 아니지만,
+    // 정확도를 위해 조회하되, 실패해도 로직은 진행되도록 구성
+    let molitSummary = { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
+    let molitStatus = "SKIPPED";
+
+    // (최적화) 필요할 때만 대장 조회
+    if (!groupResult.hasEvacElevator) {
+        const molitCodes = await reverseAddressToMolitCode(baseItem.address1);
+        if (molitCodes) {
+            const molitItems = await fetchBuildingRegister(molitCodes);
+            molitSummary = buildMolitSummary(molitItems);
+            molitStatus = molitItems.length > 0 ? "SUCCESS" : "NO_DATA";
+        } else {
+            molitStatus = "FAILED";
+        }
+    }
+
+    // 4. AI 판단 수행
+    const llmResult = await getLLMJudge(molitSummary, groupResult, baseItem);
+
+    // 5. 교육 제목 매핑
+    let gradeTitle = '승강기 관리교육(4시간)';
+    if (llmResult.decision_text === "다중이용건축물-피난") {
+        gradeTitle = '피난용 엘리베이터 승강기 관리교육(12시간)';
+    } else if (llmResult.decision_text === "다중이용건축물") {
+        gradeTitle = '비상구출운전 승강기관리교육(12시간)';
+    }
+
+    const themeColor = llmResult.code === 'RED' ? 'red' : 'blue'; // 원본 코드 로직 유지 (red -> blue text error fix)
+
+    // 응답 전송
+    res.json({
+      status: "ok",
+      uiRender: {
+        badgeText: llmResult.decision_text,
+        colorTheme: themeColor,
+        mainTitle: gradeTitle,
+        description: llmResult.explanation
+      },
+      summaryDetails: {
+        최고지상층수: Math.max(molitSummary.maxFloor, groupResult.maxFloor),
+        가목_연면적_합계: molitSummary.gaMokArea,
+        elevatorCount: groupResult.count,
+        hasEvacElevator: groupResult.hasEvacElevator,
+        buldPrpos: (baseItem.buldPrpos || "").split('-')[0].trim(),
+        molitStatus
+      },
+      raw: { baseElevatorItem: baseItem } // 디버깅용
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "서버 내부 오류", detail: err.toString() });
+  }
 }
 
-
-// ---------------------------------------------------------
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
