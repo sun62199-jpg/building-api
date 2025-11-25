@@ -194,9 +194,8 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const gaMokExists = area > 0;
     const hasEvac = elevatorSummary.hasEvacElevator;
 
-    // usage 정의
     const rawUsage = baseItem.buldPrpos || '공동주택/기타';
-    const usage = rawUsage.split('-')[0].trim(); // "-" 기준 앞부분만 사용
+    const usage = rawUsage.split('-')[0].trim();
 
     const prompt = `
 당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
@@ -211,17 +210,11 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 {
   "code": "RED 또는 BLUE",
   "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
-  "reason": "조건 평가를 보기 좋은 한글 문장으로 작성, 영어/기호 사용 금지. 예: '피난용 엘리베이터 없음, 최고층수 25층, 가목 시설 없음' ",
-  "explanation": "템플릿 문장을 그대로 사용. 치환값만 입력값으로 대체"
+  "reason": "조건 평가(evac, finalFloor, gaMokExists, gaMokArea)를 포함, TRUE/FALSE 평가",
+  "explanation": "화면 표시용 최종 한글 문장. 반드시 템플릿 그대로 사용, {usage}와 {reason} 치환"
 }
 
-[추가 규칙]
-- reason 안에 입력값(evac, finalFloor, gaMokExists, gaMokArea)과 TRUE/FALSE 평가를 반드시 포함.
-- finalResult에 따라 explanation은 반드시 템플릿 그대로 사용, 치환값({usage}, {reason})은 입력값으로 대체.
-- JSON 외 텍스트를 절대 출력하지 말 것.
-- 출력은 반드시 JSON 하나만 생성.
-
-[템플릿]
+[템플릿 — explanation에만 적용]
 - finalResult == "다중이용건축물-피난":
   "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
 - finalResult == "다중이용건축물":
@@ -254,8 +247,6 @@ usage = "${usage}"
         });
 
         const content = response.choices[0].message.content.trim();
-
-        // JSON 파싱
         const jsonStart = content.indexOf('{');
         const jsonEnd = content.lastIndexOf('}');
         if (jsonStart !== -1 && jsonEnd !== -1) {
@@ -263,7 +254,6 @@ usage = "${usage}"
             return JSON.parse(jsonStr);
         }
 
-        // LLM 오류 시 기본값
         return {
             code: "BLUE",
             decision_text: "일반건축물",
@@ -370,5 +360,6 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
