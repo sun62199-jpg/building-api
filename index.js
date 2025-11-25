@@ -222,6 +222,15 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
 - 자연어 기반 해석, 추정, 보정은 금지한다.
 - 출력은 반드시 JSON 하나만 생성한다.
 - JSON 외의 문장은 절대 출력하지 않는다.
+- reason 안에 반드시 입력값(evac, finalFloor, gaMokExists, gaMokArea) 값을 언급해야 한다.
+
+[템플릿]
+- finalResult == "다중이용건축물-피난" :
+  "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
+- finalResult == "다중이용건축물" :
+  "해당 건물의 용도는 {usage}이며, {reason} 이므로 다중이용건축물로 판단됩니다. 비상구출운전 승강기관리교육 이수가 필요합니다."
+- finalResult == "일반건축물" :
+  "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
 
 [입력값]
 evac = ${hasEvac}
@@ -340,3 +349,4 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
