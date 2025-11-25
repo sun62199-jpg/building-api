@@ -198,7 +198,7 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const rawUsage = baseItem.buldPrpos || '공동주택/기타';
     const usage = rawUsage.split('-')[0].trim(); // "-" 기준 앞부분만 사용
 
-    const prompt = `
+const prompt = `
 당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
 Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다.
 
@@ -207,7 +207,7 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 2) evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000)) → "다중이용건축물"
 3) 위 조건 모두 아니면 → "일반건축물"
 
-[출력 JSON — 절대 변경 금지]
+[출력 JSON — 반드시 이 형식으로 출력]
 {
   "code": "RED 또는 BLUE",
   "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
@@ -236,6 +236,16 @@ finalFloor = ${finalFloor}
 gaMokExists = ${gaMokExists}
 gaMokArea = ${area}
 usage = "${usage}"
+
+[예시 JSON 출력 — 반드시 이와 같은 형식으로 출력]
+{
+  "code": "RED",
+  "decision_text": "다중이용건축물-피난",
+  "reason": "evac=true(TRUE), finalFloor=35, gaMokExists=false, gaMokArea=0 조건 평가",
+  "explanation": "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
+}
+
+반드시 JSON만 출력하고, 추가 설명이나 자연어는 절대 출력하지 마십시오.
 `;
 
     try {
@@ -348,6 +358,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
