@@ -28,10 +28,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-
-// ---------------------------------------------------------
 // 4. Primary Search: By Elevator Number
-// ---------------------------------------------------------
 async function getElevatorBaseInfo(elevatorNo) {
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM`);
     const params = {
@@ -52,9 +49,7 @@ async function getElevatorBaseInfo(elevatorNo) {
 }
 
 
-// ---------------------------------------------------------
 // 5. Data Acquisition & Consolidation
-// ---------------------------------------------------------
 async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
     const searchAddr = roadAddr || jibunAddr;
     if (!searchAddr) return null;
@@ -185,9 +180,7 @@ function buildMolitSummary(items) {
 
 
 
-// ============================================================
-// 🚨 7. LLM AI Judge: AI 주도형 판단 — 프롬프트 완전 수정본
-// ============================================================
+// 6. LLM AI Judge: AI 주도형 판단 — 프롬프트 완전 수정본
 async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
@@ -276,9 +269,7 @@ usage = "${usage}"
     }
 }
 
-// ---------------------------------------------------------
-// 9. API 핸들러
-// ---------------------------------------------------------
+// 7. API 핸들러
 async function apiSummaryHandler(req, res) {
     try {
         const input = req.body.addr; 
@@ -370,8 +361,3 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
-
-
-
-
-
