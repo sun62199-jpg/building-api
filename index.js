@@ -28,6 +28,7 @@ const openai = new OpenAI({ apiKey: OPENAI_KEY });
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
+
 // ---------------------------------------------------------
 // 4. Primary Search: By Elevator Number
 // ---------------------------------------------------------
@@ -49,6 +50,7 @@ async function getElevatorBaseInfo(elevatorNo) {
         return null;
     }
 }
+
 
 // ---------------------------------------------------------
 // 5. Data Acquisition & Consolidation
@@ -85,11 +87,13 @@ async function reverseAddressToMolitCode(roadAddr, jibunAddr) {
     }
 }
 
+
 function getElevatorSummary(elevatorItems) {
     if (!elevatorItems?.length) return { maxFloor: 0 };
     const maxFloor = Math.max(...elevatorItems.map(i => Number(i.divGroundFloorCnt) || 0));
     return { maxFloor };
 }
+
 
 async function findAndGroupAllElevators(baseItem) {
     const url = new URL(`https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM`);
@@ -179,76 +183,92 @@ function buildMolitSummary(items) {
     return { totalCount: filtered.length, maxFloor, gaMokArea, gaMokType: gaMokType ? gaMokType.mainPurpsCdNm : null, items: daJungList };
 }
 
+
+
 // ============================================================
-// 🚨 7. LLM AI Judge: AI 주도형 판단 (용도 정제 적용)
+// 🚨 7. LLM AI Judge: AI 주도형 판단 — 프롬프트 완전 수정본
 // ============================================================
 async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const finalFloor = Math.max(molitSummary.maxFloor || 0, elevatorSummary.maxFloor || 0);
     const area = molitSummary.gaMokArea || 0;
-    
-    // 🚨 FIX: 용도 문자열 정제 (부용도 제거)
-    const rawUsage = baseItem.buldPrpos || '공동주택/기타';
-    const usage = rawUsage.split('-')[0].trim(); 
+    const gaMokExists = area > 0;
 
-    const hasEvac = elevatorSummary.hasEvacElevator; // Boolean
-    
-    // 🚨 AI에게 판단을 전적으로 맡기는 프롬프트
-   const prompt = `
-당신은 자연어 추론을 절대 사용하면 안 되고,
-오직 아래 Boolean 규칙만 사용해 판단한다.
+    const hasEvac = elevatorSummary.hasEvacElevator;
 
-1. evac == true → "다중이용건축물-피난"
-2. evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000))
-   → "다중이용건축물"
-3. 위 조건에 모두 해당하지 않으면 → "일반건축물"
+    // 🚨 완전 정상 작동하도록 재작성된 프롬프트 (JSON 구조 맞춤형)
+    const prompt = `
+당신은 법적 판정 전용 AI이며 자연어 추론, 연역, 일반적 판단을 절대 사용하면 안 된다.
+오직 아래 Boolean 규칙만을 사용하여 최종 결과를 산출한다.
 
-출력은 반드시:
-- evacCondition: true/false
-- floorCondition: true/false
-- gaMokCondition: true/false
-- finalResult: 문자열
+[판정 규칙]
+1) evac == true
+   → 결과 = "다중이용건축물-피난"
 
-추론, 유추, 자연어 판단을 사용하지 않는다.
+2) evac == false AND (finalFloor >= 16 OR (gaMokExists == true AND gaMokArea >= 5000))
+   → 결과 = "다중이용건축물"
+
+3) 위 조건 모두 아니면
+   → 결과 = "일반건축물"
+
+[출력 JSON 형식 — 절대 임의로 변경 금지]
+{
+  "code": "RED 또는 BLUE",
+  "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
+  "reason": "판정 이유를 Boolean 비교와 수치 기준을 기반으로 명확하게 기술"
+}
+
+[추가 규칙]
+- 조건들의 TRUE/FALSE 평가를 reason 안에 반드시 포함한다.
+- 자연어 기반 해석, 추정, 보정은 금지한다.
+- 출력은 반드시 JSON 하나만 생성한다.
+- JSON 외의 문장은 절대 출력하지 않는다.
+
+[입력값]
+evac = ${hasEvac}
+finalFloor = ${finalFloor}
+gaMokExists = ${gaMokExists}
+gaMokArea = ${area}
 `;
 
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4.1-mini",
             messages: [{ role: "user", content: prompt }],
-            temperature: 0.0, 
-            max_tokens: 400,
+            temperature: 0.0,
+            max_tokens: 500
         });
+
         const content = response.choices[0].message.content.trim();
         const s = content.indexOf('{'), e = content.lastIndexOf('}');
         if (s !== -1 && e !== -1) return JSON.parse(content.substring(s, e + 1));
         
-        return { code: "BLUE", decision_text: "일반건축물", reason: "AI 판단 중 오류가 발생하여 일반 건축물로 간주합니다." };
-    } catch (e) {
-        return { code: "BLUE", decision_text: "일반건축물", reason: "AI 서비스 연결 실패. 일반 건축물로 간주합니다." };
+        return { code: "BLUE", decision_text: "일반건축물", reason: "AI 판단 오류로 기본값 적용." };
+    } catch (err) {
+        return { code: "BLUE", decision_text: "일반건축물", reason: "AI 연결 실패." };
     }
 }
 
+
+
+// ---------------------------------------------------------
 // 9. API 핸들러
+// ---------------------------------------------------------
 async function apiSummaryHandler(req, res) {
     try {
         const input = req.body.addr; 
         if (!input) return res.status(400).json({ error: "승강기 번호가 필요합니다." });
 
-        // 1. 승강기 번호 조회
         const baseItem = await getElevatorBaseInfo(input); 
         if (!baseItem) return res.status(404).json({ error: "승강기 번호 조회 실패", detail: "일치하는 승강기 정보가 없습니다." });
         
-        // 2. 건물 통합
         const groupResult = await findAndGroupAllElevators(baseItem);
         const finalMaxFloor = groupResult.maxFloor;
         const hasEvacElevator = groupResult.hasEvacElevator;
         
         let molitSummary = { totalCount: 0, maxFloor: 0, gaMokArea: 0, items: [] };
-        let molitStatus = "SKIPPED"; 
+        let molitStatus = "SKIPPED";
 
-        // 3. MOLIT 조회 (16층 미만이고 피난용 없으면 조회 시도)
         if (!hasEvacElevator && finalMaxFloor < 16) {
-            // 🚨 FIX: address1(메인주소) 사용 (V11.8 반영)
             const molitCodes = await reverseAddressToMolitCode(baseItem.address1);
             if (molitCodes) {
                 const molitItems = await fetchBuildingRegister(molitCodes);
@@ -259,14 +279,11 @@ async function apiSummaryHandler(req, res) {
             }
         }
         
-        // 4. LLM에게 모든 판단 위임 (AI Judge)
         const llmResult = await getLLMJudge(molitSummary, groupResult, baseItem);
 
-        // LLM의 판결 결과를 UI 포맷으로 변환
-        const gradeCode = llmResult.code; // RED or BLUE
+        const gradeCode = llmResult.code;
         let gradeTitle;
-        
-        // 제목 결정 로직 (3단 분류 반영)
+
         if (llmResult.decision_text.includes("피난")) {
             gradeTitle = '피난용 엘리베이터 승강기 관리교육(12시간)';
         } else if (gradeCode === 'RED') {
@@ -275,25 +292,23 @@ async function apiSummaryHandler(req, res) {
             gradeTitle = '승강기 관리교육(4시간)';
         }
 
-        // 🚨 색상: 특수=파랑(blue), 일반=초록(green)
         const themeColor = gradeCode === 'RED' ? 'blue' : 'green'; 
 
-        // 🚨 정제된 용도 추출 (Client 전달용)
         const rawUsage = baseItem.buldPrpos || '공동주택/기타';
         const refinedUsage = rawUsage.split('-')[0].trim(); 
 
         res.json({
             status: "ok",
             uiRender: {
-                badgeText: llmResult.decision_text, // LLM이 결정한 뱃지 (3가지 중 하나)
+                badgeText: llmResult.decision_text,
                 colorTheme: themeColor,
                 mainTitle: gradeTitle,
                 description: llmResult.reason
             },
             addressInfo: { roadAddr: baseItem.address2, jibun: baseItem.address1 },
             analysis: {
-                ruleBased: gradeCode, 
-                llmFinalDecision: llmResult.decision_text, 
+                ruleBased: gradeCode,
+                llmFinalDecision: llmResult.decision_text,
                 llmReason: llmResult.reason
             },
             data: {
@@ -308,7 +323,7 @@ async function apiSummaryHandler(req, res) {
                 가목_연면적_합계: molitSummary.gaMokArea,
                 elevatorCount: groupResult.count,
                 elevatorMaxFloor: groupResult.maxFloor,
-                buldPrpos: refinedUsage, // 정제된 용도 전달
+                buldPrpos: refinedUsage,
                 molitStatus: molitStatus
             },
             raw: { baseElevatorItem: baseItem, molitItems: molitSummary.items }
@@ -320,24 +335,8 @@ async function apiSummaryHandler(req, res) {
     }
 }
 
+
+// ---------------------------------------------------------
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
