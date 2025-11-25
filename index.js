@@ -197,7 +197,7 @@ async function getLLMJudge(molitSummary, elevatorSummary, baseItem) {
     const rawUsage = baseItem.buldPrpos || '공동주택/기타';
     const usage = rawUsage.split('-')[0].trim();
 
-    const prompt = `
+const prompt = `
 당신은 법적 판정 전용 AI입니다. 자연어 추론, 연역, 추정, 보정 등은 절대 사용하지 마십시오.
 Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다.
 
@@ -210,19 +210,25 @@ Boolean 규칙과 수치 비교만 사용하여 최종 결과를 산출합니다
 {
   "code": "RED 또는 BLUE",
   "decision_text": "다중이용건축물-피난 / 다중이용건축물 / 일반건축물 중 하나",
-  "reason": "조건 평가(evac, finalFloor, gaMokExists, gaMokArea)를 포함, TRUE/FALSE 평가",
-  "explanation": "화면 표시용 최종 한글 문장. 반드시 템플릿 그대로 사용, {usage}와 {reason} 치환"
+  "reason": "조건 평가와 입력값(evac, finalFloor, gaMokExists, gaMokArea)을 포함",
+  "explanation": "최종 화면용 안내, 영어/괄호 없이 한국어로만 작성"
 }
 
-[템플릿 — explanation에만 적용]
+[추가 규칙]
+- explanation에는 영어, TRUE/FALSE, 괄호를 사용하지 말고, 한국어 문장으로 명확히 표현
+- explanation에는 {usage}, {evac 상태}, {최고층수}, {가목 시설 여부}, {가목 연면적} 정보를 포함
+- reason에는 내부용으로 정확한 조건 평가를 JSON/영문 그대로 포함
+- 출력은 반드시 JSON 하나만 생성
+
+[템플릿]
 - finalResult == "다중이용건축물-피난":
   "해당 건물은 피난용 엘리베이터가 설치되어 있는 고층건축물로 판단됩니다. 피난용 엘리베이터 승강기 관리교육 이수가 필요합니다."
 - finalResult == "다중이용건축물":
-  "해당 건물의 용도는 {usage}이며, {reason} 이므로 다중이용건축물로 판단됩니다. 비상구출운전 승강기관리교육 이수가 필요합니다."
+  "해당 건물의 용도는 {usage}이며, 피난용 엘리베이터 없음, 최고층수 {finalFloor}층 이상, 가목 시설 {gaMokExists ? '있음' : '없음'}, 가목 연면적 {gaMokArea}㎡ 조건 평가 이므로 다중이용건축물로 판단됩니다. 비상구출운전 승강기관리교육 이수가 필요합니다."
 - finalResult == "일반건축물":
   "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
 
-[입력값 — 반드시 이 값을 사용]
+[입력값]
 evac = ${hasEvac}
 finalFloor = ${finalFloor}
 gaMokExists = ${gaMokExists}
@@ -233,7 +239,7 @@ usage = "${usage}"
 {
   "code": "BLUE",
   "decision_text": "일반건축물",
-  "reason": "evac=false(FALSE), finalFloor=15(<16), gaMokExists=false(FALSE), gaMokArea=0(<5000) 조건 평가",
+  "reason": "evac=false, finalFloor=15(<16), gaMokExists=false, gaMokArea=0 조건 평가",
   "explanation": "해당 건물은 일반건축물로 판단됩니다. 승강기 관리교육 이수가 필요합니다."
 }
 `;
@@ -360,6 +366,7 @@ async function apiSummaryHandler(req, res) {
 app.post("/api/summary", apiSummaryHandler);
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
 
 
 
