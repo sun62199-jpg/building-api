@@ -22,12 +22,7 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body { font-family: 'Inter', sans-serif; background-color: #F3F4F6; }
-        .json-viewer { 
-            background-color: #F9FAFB; padding: 12px; border-radius: 6px; 
-            max-height: 200px; overflow-y: auto; white-space: pre-wrap; 
-            word-wrap: break-word; font-family: monospace; font-size: 0.7rem; 
-            border: 1px solid #E5E7EB; margin-top: 10px; color: #374151;
-        }
+        /* JSON Viewer 스타일 삭제됨 */
     </style>
 </head>
 <body class="p-4 sm:p-8 min-h-screen flex items-start justify-center">
@@ -84,15 +79,12 @@
         
         <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
             <a href="https://www.elevator.go.kr/" target="_blank"
-               class="block w-full p-4 border-2 border-dashed border-gray-400 text-center text-s font-extrabold text-gray-700 hover:bg-gray-100 hover:border-gray-500 transition duration-300 rounded-lg">
-                승강기번호 조회<br>
-                국가승강기정보센터 바로가기
+               class="block w-full p-4 border-2 border-dashed border-gray-400 text-center text-md font-extrabold text-gray-700 hover:bg-gray-100 hover:border-gray-500 transition duration-300 rounded-lg">
+                승강기번호 조회
             </a>
-            
             <a href="https://edu.koelsa.or.kr/" target="_blank"
-               class="block w-full p-4 border-2 border-dashed border-gray-400 text-center text-s font-extrabold text-gray-700 hover:bg-gray-100 hover:border-gray-500 transition duration-300 rounded-lg">
-                안전관리자 교육 신청<br>
-                승강기교육센터 바로가기
+               class="block w-full p-4 border-2 border-dashed border-gray-400 text-center text-md font-extrabold text-gray-700 hover:bg-gray-100 hover:border-gray-500 transition duration-300 rounded-lg">
+                안전관리자 교육 신청
             </a>
         </div>
 
@@ -114,11 +106,6 @@
         const ERROR = document.getElementById('errorMessage');
         const ERR_TEXT = document.getElementById('errorText');
         const LOADER = document.getElementById('loadingIndicator');
-
-        window.toggleJson = function() {
-            const viewer = document.getElementById('jsonViewer');
-            viewer.classList.toggle('hidden');
-        };
 
         async function search() {
             let addr = INPUT.value.trim();
@@ -149,12 +136,10 @@
                     throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
                 }
 
-                // 🚨 Server-Driven Data
                 const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
                     uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
                 };
                 
-                // 데이터 변수 안전 초기화
                 const molitMaxF = summaryDetails.최고지상층수 || 0;
                 const elevMaxF = summaryDetails.elevatorMaxFloor || 0; 
                 const totalAreaSum = summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
@@ -165,7 +150,6 @@
                 
                 const maxConfirmedFloor = Math.max(molitMaxF, elevMaxF);
 
-                // Color Map
                 const colorMap = {
                     red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
                     blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
@@ -216,6 +200,12 @@
                                     <span class="font-semibold text-gray-800">건물명:</span>
                                     <span>${buildingName}</span>
                                 </div>
+                                <div class="flex justify-between items-start border-b border-gray-100 py-1">
+                                    <span class="font-semibold text-gray-800 shrink-0">건물주소:</span>
+                                    <span class="text-right text-xs text-gray-600 break-words max-w-[70%]">
+                                        ${addressInfo.jibun || addressInfo.roadAddr || '주소 정보 없음'}
+                                    </span>
+                                </div>
                                 <div class="flex justify-between border-b border-gray-100 py-1">
                                     <span class="font-semibold text-gray-800">건물 용도:</span>
                                     <span>${buildingUsage}</span>
@@ -235,13 +225,7 @@
                             </div>
                         </div>
                         
-                        <div class="mt-3 text-right">
-                            <button onclick="toggleJson()" class="text-xs text-gray-400 hover:text-blue-600 underline transition">
-                                상세 데이터 원본 보기
-                            </button>
                         </div>
-                        <div id="jsonViewer" class="json-viewer hidden mt-2">${JSON.stringify(summaryDetails, null, 2)}</div>
-                    </div>
                 `;
                 RESULT.classList.remove('hidden');
 
