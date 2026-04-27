@@ -3,249 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>다중이용건축물 조회 시스템</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        'primary': '#1E3A8A', 
-                        'secondary': '#60A5FA',
-                        'soft-red': '#FEF2F2',
-                        'deep-red': '#DC2626',
-                    },
-                }
-            }
-        }
-    </script>
+    <title>승강기 & 건축물 판정기</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-        body { font-family: 'Inter', sans-serif; background-color: #F3F4F6; }
-        /* JSON Viewer 스타일 삭제됨 */
+        body { font-family: sans-serif; max-width: 500px; margin: 50px auto; padding: 20px; line-height: 1.6; background: #f4f7f6; }
+        .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 16px; }
+        button { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; }
+        #result { margin-top: 20px; display: none; }
+        .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .label { font-weight: bold; color: #555; }
+        .value { color: #000; font-weight: 600; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 14px; background: #e2e8f0; }
     </style>
 </head>
-<body class="p-4 sm:p-8 min-h-screen flex items-start justify-center">
+<body>
+    <div class="card">
+        <h2>🏢 건축물 종합 판정</h2>
+        <p>승강기 번호(7자리)를 입력하세요.</p>
+        <input type="text" id="evNo" placeholder="예: 1234567" maxlength="7">
+        <button onclick="check()">조회하기</button>
 
-    <div class="w-full max-w-lg bg-white shadow-2xl rounded-xl p-6 sm:p-8 mt-4 border border-gray-100">
-
-        <header class="text-center mb-6">
-            <h1 class="text-2xl sm:text-3xl font-extrabold text-primary mb-1">
-                다중이용건축물 조회 시스템
-            </h1>
-            <p class="text-gray-500 font-bold mt-1 text-sm">양주출장소 김영선,김찬구,박성호</p>
-            <p class="text-gray-600 text-[12px] mt-2 leading-tight">
-                안전관리자 선임시 건축물 용도에 따라 교육과정이 다르므로,<br>
-                승강기 번호로 간편하게 확인할 수 있습니다.
-            </p>
-        </header>
-
-        <section class="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <label class="block text-md font-semibold text-gray-700 mb-3">
-                승강기번호 입력
-            </label>
-            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
-                <input type="text" id="addressInput" placeholder="예: 2002377 또는 2002-377 (승강기 번호)" 
-                       class="flex-grow p-3 border-2 border-gray-300 rounded-lg text-sm focus:border-secondary focus:ring focus:ring-secondary focus:ring-opacity-50 transition duration-150 shadow-sm">
-                <button id="checkButton"
-                        class="px-5 py-3 bg-primary text-white font-bold rounded-lg hover:bg-secondary transition duration-300 shadow-md disabled:opacity-50 text-sm whitespace-nowrap">
-                    확인
-                </button>
-            </div>
-        </section>
-
-        <section class="p-4 border-4 border-dashed border-gray-200 bg-white rounded-xl min-h-[180px]">
-            <h2 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                </svg>
-                조회 결과
-            </h2>
-
-            <div id="loadingIndicator" class="hidden text-center py-8">
-                <div class="animate-spin inline-block w-8 h-8 border-4 border-t-4 border-secondary border-t-transparent rounded-full mb-3"></div>
-                <p class="text-gray-500 text-sm font-medium">데이터 분석 중...</p>
-            </div>
-
-            <div id="errorMessage" class="hidden p-3 bg-soft-red border border-deep-red text-deep-red rounded-lg text-sm font-medium mb-4 flex items-start">
-                <span class="mr-2">❌</span>
-                <span id="errorText"></span>
-            </div>
-
-            <div id="resultOutput" class="space-y-4">
-                <p class="text-gray-400 text-sm italic text-center py-6">승강기 번호를 입력하고 확인 버튼을 눌러주세요.</p>
-            </div>
-        </section>
-        
-        <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <a href="https://www.elevator.go.kr/" target="_blank"
-               class="block w-full p-4 border-2 border-dashed border-gray-400 text-center text-sm font-extrabold text-gray-700 hover:bg-gray-100 hover:border-gray-500 transition duration-300 rounded-lg">
-                👉승강기번호 조회👈<br>국가승강기정보센터 바로가기
-            </a>
-            <a href="https://edu.koelsa.or.kr/" target="_blank"
-               class="block w-full p-4 border-2 border-dashed border-gray-400 text-center text-sm font-extrabold text-gray-700 hover:bg-gray-100 hover:border-gray-500 transition duration-300 rounded-lg">
-                👉안전관리자 교육 신청👈<br>승강기교육센터 바로가기
-            </a>
+        <div id="result">
+            <div class="row"><span class="label">주소</span><span id="addr" class="value"></span></div>
+            <div class="row"><span class="label">다중이용 분류</span><span id="multiType" class="badge"></span></div>
+            <div class="row"><span class="label">집합건축물</span><span id="isColl" class="value"></span></div>
+            <div class="row"><span class="label">법정필수승강기</span><span id="isMand" class="value"></span></div>
         </div>
-
-        <section class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200 text-xs">
-             <h3 class="font-semibold text-primary mb-2">💡 이용 안내</h3>
-             <ul class="list-disc list-inside text-gray-600 space-y-1">
-                 <li>LLM이 판정하고, 문구를 출력합니다.(LLM=chatGPT-4.1 mini)</li>
-                 <li>건축물대장과 승강기 정보를 교차 분석하여 안내합니다.</li>
-                 <li>데이터 불일치 시 현장 확인이 필요할 수 있습니다.</li>
-             </ul>
-         </section>
-
     </div>
 
     <script>
-        const BTN = document.getElementById('checkButton');
-        const INPUT = document.getElementById('addressInput');
-        const RESULT = document.getElementById('resultOutput');
-        const ERROR = document.getElementById('errorMessage');
-        const ERR_TEXT = document.getElementById('errorText');
-        const LOADER = document.getElementById('loadingIndicator');
+        async function check() {
+            const evNo = document.getElementById('evNo').value;
+            if(!evNo) return alert('번호를 입력하세요');
+            
+            const res = await fetch('/api/summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ addr: evNo })
+            });
+            const data = await res.json();
+            
+            if(data.error) return alert(data.error);
 
-        async function search() {
-            let addr = INPUT.value.trim();
-            if (!addr) {
-                ERR_TEXT.textContent = "승강기 번호를 입력해주세요.";
-                ERROR.classList.remove('hidden');
-                return;
-            }
-
-            // 🚀 입력값에서 "-" 제거
-            addr = addr.replace(/-/g, '');
-
-            BTN.disabled = true;
-            LOADER.classList.remove('hidden');
-            RESULT.classList.add('hidden');
-            ERROR.classList.add('hidden');
-            RESULT.innerHTML = '';
-
-            try {
-                const res = await fetch('/api/summary', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ addr })
-                });
-                
-                const json = await responseJsonSafe(res);
-
-                if (!res.ok || json.error) {
-                    throw new Error(json.detail || json.error || '알 수 없는 서버 오류');
-                }
-
-                const { uiRender, data, raw, analysis, summaryDetails, addressInfo } = {
-                    uiRender: {}, analysis: {}, summaryDetails: {}, data: {}, addressInfo: {}, ...json
-                };
-                
-                const molitMaxF = summaryDetails.최고지상층수 || 0;
-                const elevMaxF = summaryDetails.elevatorMaxFloor || 0; 
-                const totalAreaSum = summaryDetails.가목_연면적_합계?.toFixed(2) || '0.00';
-                const elevCount = summaryDetails.elevatorCount || 0;
-                
-                const buildingName = raw?.baseElevatorItem?.buldNm || '이름 없음';
-                const buildingUsage = summaryDetails.buldPrpos || summaryDetails.gaMokType || '정보 없음';
-                
-                const maxConfirmedFloor = Math.max(molitMaxF, elevMaxF);
-
-                const colorMap = {
-                    red: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }, 
-                    blue: { border: 'border-green-500', bg: 'bg-green-100', text: 'text-green-800', title: 'text-green-600', ruleBg: 'bg-green-50', ruleText: 'text-green-700' },
-                    yellow: { border: 'border-yellow-500', bg: 'bg-yellow-100', text: 'text-yellow-800', title: 'text-yellow-600', ruleBg: 'bg-yellow-50', ruleText: 'text-yellow-700' },
-                    gray: { border: 'border-blue-500', bg: 'bg-blue-100', text: 'text-blue-800', title: 'text-blue-600', ruleBg: 'bg-blue-50', ruleText: 'text-blue-700' }
-                };
-                const theme = colorMap[uiRender.colorTheme] || colorMap['gray'];
-
-                const ruleCode = analysis.ruleBased; 
-                const ruleText = ruleCode === 'RED' ? '다중이용건축물 (특수)' : '일반건축물 (일반)';
-                const ruleIcon = ruleCode === 'RED' ? '🏢' : (ruleCode === 'BLUE' ? '🏠' : '⚠️');
-                const aiDecisionRaw = analysis.llmFinalDecision || '판단불가';
-                let aiDecisionDisplay = aiDecisionRaw;
-                if (aiDecisionRaw === '예') aiDecisionDisplay = '다중이용건축물';
-                else if (aiDecisionRaw === '아니오') aiDecisionDisplay = '일반건축물';
-
-                RESULT.innerHTML = `
-                    <div class="border-l-4 ${theme.border} pl-4 py-1">
-
-                        <div class="p-3 rounded-lg border-2 border-yellow-500 bg-yellow-50 mb-4">
-                            <p class="text-xs font-bold text-yellow-800 mb-1">🧠 AI 판단 결과</p>
-                            <p class="text-xl font-extrabold text-yellow-900 leading-tight">
-                                ${aiDecisionDisplay}
-                            </p>
-                        </div>
-
-                        <div class="p-3 rounded-lg border ${theme.border} ${theme.ruleBg} mb-4">
-                            <p class="text-xs font-bold ${theme.ruleText} mb-2">🤖 AI 종합 분석 (LLM)</p>
-                            <p class="text-xs text-gray-700 leading-relaxed">
-                                ${uiRender.description}
-                            </p>
-                        </div>
-
-                        <div class="bg-gray-50 p-3 rounded-lg mb-3 border border-gray-200">
-                            <p class="text-[10px] text-gray-500 mb-1 font-bold uppercase">안내 사항</p>
-                            <p class="font-bold ${theme.title} text-sm leading-snug break-keep">
-                                ${uiRender.mainTitle}
-                            </p>
-                        </div>
-
-                        <div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm mb-4 mt-4">
-                            <h6 class="text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider flex items-center">
-                                <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-                                최종 건물 속성 요약
-                            </h6>
-                            <div class="space-y-1 text-sm text-gray-700">
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">건물명:</span>
-                                    <span>${buildingName}</span>
-                                </div>
-                                <div class="flex justify-between items-start border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800 shrink-0">건물주소:</span>
-                                    <span class="text-right text-xs text-gray-600 break-words max-w-[70%]">
-                                        ${addressInfo.jibun || addressInfo.roadAddr || '주소 정보 없음'}
-                                    </span>
-                                </div>
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">건물 용도:</span>
-                                    <span>${buildingUsage}</span>
-                                </div>
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">최고층수:</span>
-                                    <span><b>${maxConfirmedFloor}F</b></span>
-                                </div>
-                                <div class="flex justify-between border-b border-gray-100 py-1">
-                                    <span class="font-semibold text-gray-800">보유대수:</span>
-                                    <span>${elevCount}대</span>
-                                </div>
-                                <div class="flex justify-between py-1">
-                                    <span class="font-semibold text-gray-800">가목 연면적:</span>
-                                    <span>${totalAreaSum > 0 ? `<b>${totalAreaSum}㎡</b>` : '조회 불필요'}</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        </div>
-                `;
-                RESULT.classList.remove('hidden');
-
-            } catch (e) {
-                ERR_TEXT.textContent = e.message;
-                ERROR.classList.remove('hidden');
-            } finally {
-                LOADER.classList.add('hidden');
-                BTN.disabled = false;
-            }
+            document.getElementById('result').style.display = 'block';
+            document.getElementById('addr').innerText = data.address;
+            document.getElementById('multiType').innerText = data.multiType;
+            document.getElementById('isColl').innerText = data.isCollective;
+            document.getElementById('isMand').innerText = data.isMandatory;
         }
-
-        async function responseJsonSafe(res) {
-            const text = await res.text();
-            try { return JSON.parse(text); } 
-            catch { return { error: '서버 응답 형식 오류', detail: text.substring(0, 100) }; }
-        }
-
-        BTN.addEventListener('click', search);
-        INPUT.addEventListener('keydown', e => e.key === 'Enter' && search());
     </script>
 </body>
 </html>
