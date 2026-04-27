@@ -8,13 +8,13 @@ const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fet
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Render 설정에서 넣은 API 키들
+// Render Dashboard > Environment Variables에 등록한 키들
 const { JUSO_KEY, MOLIT_KEY, ELEVATOR_KEY } = process.env;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 1. 승강기 데이터 수집 (건물이름, 전체 주소 포함)
+// 1. 승강기 데이터 수집
 async function getElevatorData(elevatorNo) {
     const url = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${ELEVATOR_KEY}&elevator_no=${elevatorNo}&_type=json`;
     try {
@@ -23,7 +23,7 @@ async function getElevatorData(elevatorNo) {
         const item = data.response?.body?.item;
         if (!item) return null;
 
-        // 동일 건물 그룹 조회를 통해 피난용 여부와 정확한 최고층수 파악
+        // 건물 내 전체 승강기 조회 (피난용 체크 및 최고층 확인)
         const listUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM?serviceKey=${ELEVATOR_KEY}&sido=${encodeURIComponent(item.address1.split(' ')[0])}&sigungu=${encodeURIComponent(item.address1.split(' ')[1])}&buld_nm=${encodeURIComponent(item.buldNm)}&_type=json`;
         const listRes = await fetch(listUrl);
         const listData = await listRes.json();
@@ -40,14 +40,13 @@ async function getElevatorData(elevatorNo) {
 
 // 2. 건축물대장 데이터 수집
 async function getBuildingData(address) {
-    // 글자 주소를 코드로 변환 (주소 API)
+    if (!address) return null;
     const jusoUrl = `https://business.juso.go.kr/addrlink/addrLinkApi.do?confmKey=${JUSO_KEY}&keyword=${encodeURIComponent(address)}&resultType=json`;
     const resJuso = await fetch(jusoUrl);
     const dataJuso = await resJuso.json();
     const juso = dataJuso.results?.juso?.[0];
     if (!juso) return null;
 
-    // 변환된 코드로 대장 조회
     const molitUrl = `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo?serviceKey=${MOLIT_KEY}&sigunguCd=${juso.admCd.substring(0, 5)}&bjdongCd=${juso.admCd.substring(5, 10)}&bun=${juso.lnbrMnnm.padStart(4, '0')}&ji=${juso.lnbrSlno.padStart(4, '0')}&_type=json`;
     const resMolit = await fetch(molitUrl);
     const dataMolit = await resMolit.json();
@@ -75,9 +74,10 @@ app.post("/api/summary", async (req, res) => {
         const evData = await getElevatorData(elevatorNo);
         if (!evData) return res.status(404).json({ error: "조회 결과 없음" });
 
-        const blData = await getBuildingData(evData.base.address1);
+        // 주소가 비어있을 경우를 대비해 address1(지번)을 우선 활용
+        const blData = await getBuildingData(evData.base.address1 || evData.base.address2);
 
-        // 데이터 판정
+        // 데이터 판정 로직
         let multiType = "일반건축물";
         const finalMaxFloor = Math.max(evData.maxFloor, blData?.maxFloor || 0);
         const finalGaMokArea = blData?.gaMokAreaSum || 0;
@@ -89,8 +89,9 @@ app.post("/api/summary", async (req, res) => {
         const isMandatory = (finalMaxFloor >= 6 && Number(blData?.totArea || 0) >= 2000) || finalMaxFloor >= 11 ? "YES" : "NO";
 
         res.json({
-            buldNm: evData.base.buldNm,     // 건물이름
-            address: evData.base.address2,  // 전체 도로명주소
+            buldNm: evData.base.buldNm || '이름 없는 건물',
+            // address2(도로명)가 없으면 address1(지번)을 보여줌
+            address: evData.base.address2 || evData.base.address1 || '주소 정보 없음',
             multiType,
             isCollective,
             isMandatory,
