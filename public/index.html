@@ -5,56 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>건축물 종합 판정 시스템</title>
     <style>
-        body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background-color: #f4f6f9; color: #2c3e50; }
-        .container { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.08); }
-        h2 { text-align: center; color: #1a73e8; margin-bottom: 30px; letter-spacing: -1px; }
-        .input-group { display: flex; gap: 10px; margin-bottom: 25px; }
-        input { flex: 1; padding: 16px; border: 2px solid #eef2f6; border-radius: 12px; font-size: 16px; outline: none; transition: 0.3s; background: #f8f9fa; }
-        input:focus { border-color: #1a73e8; background: #fff; box-shadow: 0 0 0 4px rgba(26,115,232,0.1); }
-        button { padding: 16px 28px; background: #1a73e8; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 16px; transition: 0.3s; }
-        button:hover { background: #1557b0; transform: translateY(-1px); }
+        body { font-family: 'Pretendard', sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background-color: #f4f7fa; color: #333; }
+        .container { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.08); }
+        h2 { text-align: center; color: #1a73e8; margin-bottom: 25px; }
+        .input-group { display: flex; gap: 8px; margin-bottom: 25px; }
+        input { flex: 1; padding: 15px; border: 2px solid #eee; border-radius: 12px; font-size: 16px; outline: none; transition: 0.3s; }
+        input:focus { border-color: #1a73e8; }
+        button { padding: 15px 25px; background: #1a73e8; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 16px; }
         
-        #result { margin-top: 30px; display: none; border-top: 2px solid #f4f6f9; padding-top: 25px; }
-        .row { display: flex; justify-content: space-between; align-items: flex-start; padding: 15px 0; border-bottom: 1px solid #f8f9fa; }
-        .label { font-weight: 500; color: #7f8c8d; font-size: 15px; min-width: 120px; }
-        .value { font-weight: 700; color: #2c3e50; text-align: right; word-break: keep-all; font-size: 16px; flex: 1; }
-        .badge { padding: 6px 14px; border-radius: 10px; font-size: 14px; font-weight: bold; background: #e8f0fe; color: #1a73e8; }
-        
-        .loading { text-align: center; display: none; color: #666; margin-top: 15px; font-weight: 500; }
-        .error-msg { color: #d93025; text-align: center; margin-top: 10px; font-size: 14px; display: none; }
+        #result { margin-top: 25px; display: none; padding-top: 20px; border-top: 2px solid #f4f7fa; }
+        .row { display: flex; justify-content: space-between; padding: 15px 0; border-bottom: 1px solid #f9f9f9; align-items: flex-start; }
+        .label { font-weight: 500; color: #777; min-width: 110px; font-size: 14px; }
+        .value { font-weight: 700; color: #111; text-align: right; flex: 1; word-break: keep-all; font-size: 15px; }
+        .badge { padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; background: #e8f0fe; color: #1a73e8; }
+        .loading { text-align: center; display: none; color: #666; margin-top: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>🏢 건축물 종합 판정</h2>
         <div class="input-group">
-            <input type="text" id="evNo" placeholder="승강기번호 7자리 입력" maxlength="7">
+            <input type="text" id="evNo" placeholder="승강기번호 7자리" maxlength="7">
             <button onclick="check()">조회하기</button>
         </div>
-        <div id="loading" class="loading">데이터를 정밀 분석 중입니다...</div>
-        <div id="error" class="error-msg"></div>
+        <div id="loading" class="loading">데이터 분석 중...</div>
 
         <div id="result">
-            <div class="row">
-                <span class="label">건물이름</span>
-                <span id="buldNm" class="value">-</span>
-            </div>
-            <div class="row">
-                <span class="label">상세주소</span>
-                <span id="addr" class="value">-</span>
-            </div>
-            <div class="row">
-                <span class="label">다중이용 분류</span>
-                <span id="multiType" class="badge">-</span>
-            </div>
-            <div class="row">
-                <span class="label">집합건축물 여부</span>
-                <span id="isColl" class="value">-</span>
-            </div>
-            <div class="row">
-                <span class="label">법정필수 승강기</span>
-                <span id="isMand" class="value">-</span>
-            </div>
+            <div class="row"><span class="label">건물이름</span><span id="buldNm" class="value"></span></div>
+            <div class="row"><span class="label">상세주소</span><span id="addr" class="value"></span></div>
+            <div class="row"><span class="label">다중이용 분류</span><span id="multiType" class="badge"></span></div>
+            <div class="row"><span class="label">집합건축물</span><span id="isColl" class="value"></span></div>
+            <div class="row"><span class="label">법정필수</span><span id="isMand" class="value"></span></div>
         </div>
     </div>
 
@@ -63,49 +44,34 @@
             const evNo = document.getElementById('evNo').value;
             const resDiv = document.getElementById('result');
             const loader = document.getElementById('loading');
-            const errorDiv = document.getElementById('error');
 
-            if(evNo.length < 7) {
-                alert('승강기번호 7자리를 입력해주세요.');
-                return;
-            }
+            if(evNo.length < 7) return alert('번호를 입력하세요');
             
             resDiv.style.display = 'none';
-            errorDiv.style.display = 'none';
             loader.style.display = 'block';
 
             try {
-                const response = await fetch('/api/summary', {
+                const res = await fetch('/api/summary', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ addr: evNo })
                 });
-                
-                if(!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || '조회 실패');
-                }
-                
-                const data = await response.json();
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
 
                 document.getElementById('buldNm').innerText = data.buldNm;
                 document.getElementById('addr').innerText = data.address;
                 document.getElementById('multiType').innerText = data.multiType;
                 document.getElementById('isColl').innerText = data.isCollective;
                 document.getElementById('isMand').innerText = data.isMandatory;
-                
                 resDiv.style.display = 'block';
             } catch (err) {
-                errorDiv.innerText = err.message;
-                errorDiv.style.display = 'block';
+                alert(err.message);
             } finally {
                 loader.style.display = 'none';
             }
         }
-
-        document.getElementById('evNo').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') check();
-        });
+        document.getElementById('evNo').addEventListener('keypress', (e) => e.key === 'Enter' && check());
     </script>
 </body>
 </html>
