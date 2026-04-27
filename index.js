@@ -2,17 +2,19 @@ const express = require("express");
 const path = require("path");
 require("dotenv").config();
 
+// node-fetch v3 (Render 환경 대응)
 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Render 설정에서 넣은 API 키들
 const { JUSO_KEY, MOLIT_KEY, ELEVATOR_KEY } = process.env;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 승강기 데이터 수집
+// 1. 승강기 데이터 수집 (건물이름, 전체 주소 포함)
 async function getElevatorData(elevatorNo) {
     const url = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${ELEVATOR_KEY}&elevator_no=${elevatorNo}&_type=json`;
     try {
@@ -21,6 +23,7 @@ async function getElevatorData(elevatorNo) {
         const item = data.response?.body?.item;
         if (!item) return null;
 
+        // 동일 건물 그룹 조회를 통해 피난용 여부와 정확한 최고층수 파악
         const listUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM?serviceKey=${ELEVATOR_KEY}&sido=${encodeURIComponent(item.address1.split(' ')[0])}&sigungu=${encodeURIComponent(item.address1.split(' ')[1])}&buld_nm=${encodeURIComponent(item.buldNm)}&_type=json`;
         const listRes = await fetch(listUrl);
         const listData = await listRes.json();
@@ -35,14 +38,16 @@ async function getElevatorData(elevatorNo) {
     } catch (e) { return null; }
 }
 
-// 건축물대장 데이터 수집 및 집합건물 판정
+// 2. 건축물대장 데이터 수집
 async function getBuildingData(address) {
+    // 글자 주소를 코드로 변환 (주소 API)
     const jusoUrl = `https://business.juso.go.kr/addrlink/addrLinkApi.do?confmKey=${JUSO_KEY}&keyword=${encodeURIComponent(address)}&resultType=json`;
     const resJuso = await fetch(jusoUrl);
     const dataJuso = await resJuso.json();
     const juso = dataJuso.results?.juso?.[0];
     if (!juso) return null;
 
+    // 변환된 코드로 대장 조회
     const molitUrl = `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo?serviceKey=${MOLIT_KEY}&sigunguCd=${juso.admCd.substring(0, 5)}&bjdongCd=${juso.admCd.substring(5, 10)}&bun=${juso.lnbrMnnm.padStart(4, '0')}&ji=${juso.lnbrSlno.padStart(4, '0')}&_type=json`;
     const resMolit = await fetch(molitUrl);
     const dataMolit = await resMolit.json();
@@ -63,6 +68,7 @@ async function getBuildingData(address) {
     return { gaMokAreaSum, maxFloor, regstrGbCd, totArea: itemList[0]?.totArea || 0 };
 }
 
+// 3. 메인 핸들러
 app.post("/api/summary", async (req, res) => {
     try {
         const elevatorNo = req.body.addr;
@@ -71,30 +77,29 @@ app.post("/api/summary", async (req, res) => {
 
         const blData = await getBuildingData(evData.base.address1);
 
-        // 1. 다중이용건축물 분류
+        // 데이터 판정
         let multiType = "일반건축물";
         const finalMaxFloor = Math.max(evData.maxFloor, blData?.maxFloor || 0);
         const finalGaMokArea = blData?.gaMokAreaSum || 0;
+        
         if (evData.hasEvac) multiType = "피난용건축물";
         else if (finalMaxFloor >= 16 || finalGaMokArea >= 5000) multiType = "다중이용건축물";
 
-        // 2. 집합건축물 여부 (코드 2)
         const isCollective = blData?.regstrGbCd === "2" ? "YES" : "NO";
-
-        // 3. 법정필수승강기 여부 (6층 이상 & 2000㎡ 이상 또는 11층 이상)
         const isMandatory = (finalMaxFloor >= 6 && Number(blData?.totArea || 0) >= 2000) || finalMaxFloor >= 11 ? "YES" : "NO";
 
         res.json({
-            address: evData.base.address2,
+            buldNm: evData.base.buldNm,     // 건물이름
+            address: evData.base.address2,  // 전체 도로명주소
             multiType,
             isCollective,
             isMandatory,
             info: { floor: finalMaxFloor, area: finalGaMokArea }
         });
     } catch (err) {
-        res.status(500).json({ error: "서버 오류" });
+        res.status(500).json({ error: "서버 내부 오류" });
     }
 });
 
 app.get("/", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`Server is running on port ${PORT}`));
