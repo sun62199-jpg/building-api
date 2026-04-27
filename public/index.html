@@ -2,67 +2,108 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>건축물 종합 판정 시스템</title>
     <style>
-        body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background-color: #f4f6f9; color: #2c3e50; }
-        .container { background: white; padding: 30px; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.08); position: relative; }
-        h2 { text-align: center; color: #1a73e8; margin-bottom: 30px; letter-spacing: -1px; }
-        .input-group { display: flex; gap: 10px; margin-bottom: 25px; }
-        input { flex: 1; padding: 16px; border: 2px solid #eef2f6; border-radius: 12px; font-size: 16px; outline: none; transition: 0.3s; background: #f8f9fa; }
-        input:focus { border-color: #1a73e8; background: #fff; box-shadow: 0 0 0 4px rgba(26,115,232,0.1); }
-        button { padding: 16px 28px; background: #1a73e8; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; font-size: 16px; transition: 0.3s; }
-        button:hover { background: #1557b0; transform: translateY(-1px); }
-        
-        #result { margin-top: 30px; display: none; border-top: 2px solid #f4f6f9; padding-top: 25px; }
-        .row { display: flex; justify-content: space-between; align-items: flex-start; padding: 15px 0; border-bottom: 1px solid #f8f9fa; }
-        .label { font-weight: 500; color: #7f8c8d; font-size: 15px; min-width: 120px; }
-        .value { font-weight: 700; color: #2c3e50; text-align: right; word-break: keep-all; font-size: 16px; flex: 1; }
-        .badge { padding: 6px 14px; border-radius: 10px; font-size: 14px; font-weight: bold; background: #e8f0fe; color: #1a73e8; }
-        
-        .loading { text-align: center; display: none; color: #666; margin-top: 15px; font-weight: 500; }
-        .error-msg { color: #d93025; text-align: center; margin-top: 10px; font-size: 14px; display: none; }
-        
-        /* 하단 경고 문구 스타일 */
-        .disclaimer { margin-top: 40px; padding: 15px; background: #fff9f9; border: 1px solid #ffebeb; border-radius: 10px; font-size: 13px; color: #a34e4e; line-height: 1.6; text-align: center; }
+        /* 모바일 최적화 스타일 */
+        body { 
+            font-family: 'Pretendard', -apple-system, sans-serif; 
+            margin: 0; 
+            padding: 20px 15px; 
+            background-color: #f4f6f9; 
+            color: #2c3e50; 
+            line-height: 1.5;
+        }
+        .container { 
+            background: white; 
+            padding: 25px 20px; 
+            border-radius: 20px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05); 
+            max-width: 500px; 
+            margin: 0 auto; 
+        }
+        h2 { text-align: center; color: #1a73e8; margin-bottom: 25px; font-size: 20px; }
+        .input-group { display: flex; gap: 8px; margin-bottom: 20px; }
+        input { 
+            flex: 1; 
+            padding: 14px; 
+            border: 2px solid #eef2f6; 
+            border-radius: 12px; 
+            font-size: 16px; 
+            box-sizing: border-box;
+            outline: none;
+        }
+        input:focus { border-color: #1a73e8; }
+        button { 
+            padding: 0 18px; 
+            background: #1a73e8; 
+            color: white; 
+            border: none; 
+            border-radius: 12px; 
+            font-weight: bold; 
+            font-size: 15px;
+            white-space: nowrap;
+        }
+        #result { margin-top: 25px; display: none; border-top: 2px solid #f4f6f9; }
+        .row { 
+            display: flex; 
+            flex-direction: column; 
+            padding: 15px 0; 
+            border-bottom: 1px solid #f8f9fa; 
+        }
+        /* 가로 폭이 어느정도 확보되면 가로 배치 */
+        @media (min-width: 380px) {
+            .row { flex-direction: row; justify-content: space-between; align-items: flex-start; }
+            .label { margin-bottom: 0; min-width: 100px; }
+            .value { text-align: right; }
+        }
+        .label { font-weight: 500; color: #7f8c8d; font-size: 14px; margin-bottom: 4px; }
+        .value { font-weight: 700; color: #2c3e50; font-size: 15px; word-break: break-all; flex: 1; }
+        .badge { 
+            display: inline-block; 
+            padding: 4px 10px; 
+            border-radius: 8px; 
+            font-size: 13px; 
+            font-weight: bold; 
+            background: #e8f0fe; 
+            color: #1a73e8; 
+            margin-top: 5px;
+        }
+        .loading { text-align: center; display: none; color: #666; margin: 20px 0; font-size: 14px; }
+        .disclaimer { 
+            margin-top: 30px; 
+            padding: 15px; 
+            background: #fff9f9; 
+            border: 1px solid #ffebeb; 
+            border-radius: 12px; 
+            font-size: 12px; 
+            color: #a34e4e; 
+            text-align: center; 
+            word-break: keep-all; 
+            line-height: 1.6;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h2>🏢 건축물 종합 판정</h2>
         <div class="input-group">
-            <input type="text" id="evNo" placeholder="승강기번호 7자리 입력" maxlength="7">
-            <button onclick="check()">조회하기</button>
+            <input type="text" id="evNo" placeholder="승강기번호 7자리" maxlength="7" inputmode="numeric">
+            <button onclick="check()">조회</button>
         </div>
-        <div id="loading" class="loading">데이터를 정밀 분석 중입니다...</div>
-        <div id="error" class="error-msg"></div>
+        <div id="loading" class="loading">데이터 분석 중...</div>
 
         <div id="result">
-            <div class="row">
-                <span class="label">건물이름</span>
-                <span id="buldNm" class="value">-</span>
-            </div>
-            <div class="row">
-                <span class="label">상세주소</span>
-                <span id="addr" class="value">-</span>
-            </div>
-            <div class="row">
-                <span class="label">다중이용 분류</span>
-                <span id="multiType" class="badge">-</span>
-            </div>
-            <div class="row">
-                <span class="label">집합건축물 여부</span>
-                <span id="isColl" class="value">-</span>
-            </div>
-            <div class="row">
-                <span class="label">법정필수 승강기</span>
-                <span id="isMand" class="value">-</span>
-            </div>
+            <div class="row"><span class="label">건물이름</span><span id="buldNm" class="value"></span></div>
+            <div class="row"><span class="label">상세주소</span><span id="addr" class="value"></span></div>
+            <div class="row"><span class="label">다중이용 분류</span><div><span id="multiType" class="badge"></span></div></div>
+            <div class="row"><span class="label">집합건축물</span><span id="isColl" class="value"></span></div>
+            <div class="row"><span class="label">법정필수</span><span id="isMand" class="value"></span></div>
         </div>
 
         <div class="disclaimer">
             ⚠️ 해당 정보는 제공된 API를 이용하여 나온 정보로 100% 정확하지 않을 수 있습니다. 참고용으로 사용바랍니다.<br>
-             <strong>※ 주소 미출력 시 공단 API에서 정보를 제공하지 않는 승강기입니다.</strong>
+            <strong>※ 주소 미출력 시 공단 API에서 정보를 제공하지 않는 승강기입니다.</strong>
         </div>
     </div>
 
@@ -71,60 +112,49 @@
             const evNo = document.getElementById('evNo').value;
             const resDiv = document.getElementById('result');
             const loader = document.getElementById('loading');
-            const errorDiv = document.getElementById('error');
 
-            if(evNo.length < 7) {
-                alert('승강기번호 7자리를 입력해주세요.');
-                return;
-            }
+            if(evNo.length < 7) return alert('번호 7자리를 입력하세요.');
             
             resDiv.style.display = 'none';
-            errorDiv.style.display = 'none';
             loader.style.display = 'block';
 
             try {
-                const response = await fetch('/api/summary', {
+                const res = await fetch('/api/summary', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ addr: evNo })
                 });
-                
-                if(!response.ok) {
-                    const errorData = await response.json();
-                    throw new Error(errorData.error || '조회 실패');
-                }
-                
-                const data = await response.json();
+                const data = await res.json();
+                if(data.error) throw new Error(data.error);
 
                 document.getElementById('buldNm').innerText = data.buldNm;
                 
-                // 주소 출력 순서 변경: 지번주소를 괄호 밖으로, 도로명주소를 괄호 안으로
-                // 서버에서 '도로명 (지번)' 순서로 오던 형식을 프론트에서 재배치합니다.
+                // 주소 형식 변환: 지번 (도로명)
                 let displayAddr = data.address;
                 if (data.address.includes('(')) {
                     const parts = data.address.split('(');
                     const roadAddr = parts[0].trim();
                     const jibunAddr = parts[1].replace(')', '').trim();
-                    displayAddr = `${jibunAddr} (${roadAddr})`;
+                    
+                    if (!roadAddr || roadAddr === '도로명 없음') {
+                        displayAddr = jibunAddr;
+                    } else {
+                        displayAddr = `${jibunAddr} (${roadAddr})`;
+                    }
                 }
-
+                
                 document.getElementById('addr').innerText = displayAddr;
                 document.getElementById('multiType').innerText = data.multiType;
                 document.getElementById('isColl').innerText = data.isCollective;
                 document.getElementById('isMand').innerText = data.isMandatory;
-                
                 resDiv.style.display = 'block';
             } catch (err) {
-                errorDiv.innerText = err.message;
-                errorDiv.style.display = 'block';
+                alert(err.message);
             } finally {
                 loader.style.display = 'none';
             }
         }
-
-        document.getElementById('evNo').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') check();
-        });
+        document.getElementById('evNo').addEventListener('keypress', (e) => e.key === 'Enter' && check());
     </script>
 </body>
 </html>
