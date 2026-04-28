@@ -51,7 +51,6 @@
             padding: 15px 0; 
             border-bottom: 1px solid #f8f9fa; 
         }
-        /* 가로 폭이 어느정도 확보되면 가로 배치 */
         @media (min-width: 380px) {
             .row { flex-direction: row; justify-content: space-between; align-items: flex-start; }
             .label { margin-bottom: 0; min-width: 100px; }
@@ -70,6 +69,9 @@
             margin-top: 5px;
         }
         .loading { text-align: center; display: none; color: #666; margin: 20px 0; font-size: 14px; }
+        /* 추가 정보(층수/면적) 스타일 */
+        .info-text { font-size: 12px; color: #1a73e8; font-weight: normal; display: block; margin-top: 4px; }
+        
         .disclaimer { 
             margin-top: 30px; 
             padding: 15px; 
@@ -91,19 +93,25 @@
             <input type="text" id="evNo" placeholder="승강기번호 7자리" maxlength="7" inputmode="numeric">
             <button onclick="check()">조회</button>
         </div>
-        <div id="loading" class="loading">데이터 분석 중...</div>
+        <div id="loading" class="loading">단지 데이터 통합 분석 중...</div>
 
         <div id="result">
             <div class="row"><span class="label">건물이름</span><span id="buldNm" class="value"></span></div>
             <div class="row"><span class="label">상세주소</span><span id="addr" class="value"></span></div>
-            <div class="row"><span class="label">다중이용 분류</span><div><span id="multiType" class="badge"></span></div></div>
+            <div class="row">
+                <span class="label">다중이용 분류</span>
+                <div>
+                    <span id="multiType" class="badge"></span>
+                    <span id="subInfo" class="info-text"></span>
+                </div>
+            </div>
             <div class="row"><span class="label">집합건축물</span><span id="isColl" class="value"></span></div>
             <div class="row"><span class="label">법정필수</span><span id="isMand" class="value"></span></div>
         </div>
 
         <div class="disclaimer">
-            ⚠️ 해당 정보는 제공된 API를 이용하여 나온 정보로 100% 정확하지 않을 수 있습니다. 참고용으로 사용바랍니다.<br>
-            <strong>※ 주소 미출력 시 공단 API에서 정보를 제공하지 않는 승강기입니다.</strong>
+            ⚠️ 해당 정보는 단지 전체(지번 기준)를 통합 분석한 결과입니다.<br>
+            <strong>※ 주소 미출력 시 공단 API 정보 부재 승강기입니다.</strong>
         </div>
     </div>
 
@@ -128,25 +136,17 @@
                 if(data.error) throw new Error(data.error);
 
                 document.getElementById('buldNm').innerText = data.buldNm;
-                
-                // 주소 형식 변환: 지번 (도로명)
-                let displayAddr = data.address;
-                if (data.address.includes('(')) {
-                    const parts = data.address.split('(');
-                    const roadAddr = parts[0].trim();
-                    const jibunAddr = parts[1].replace(')', '').trim();
-                    
-                    if (!roadAddr || roadAddr === '도로명 없음') {
-                        displayAddr = jibunAddr;
-                    } else {
-                        displayAddr = `${jibunAddr} (${roadAddr})`;
-                    }
-                }
-                
-                document.getElementById('addr').innerText = displayAddr;
+                document.getElementById('addr').innerText = data.address;
                 document.getElementById('multiType').innerText = data.multiType;
                 document.getElementById('isColl').innerText = data.isCollective;
                 document.getElementById('isMand').innerText = data.isMandatory;
+                
+                // 통합 판정 근거 (층수, 면적) 표시
+                if(data.info) {
+                    document.getElementById('subInfo').innerText = 
+                        `기준: 최고 ${data.info.floor}층 / 대상면적 합계 ${data.info.area.toLocaleString()}㎡`;
+                }
+
                 resDiv.style.display = 'block';
             } catch (err) {
                 alert(err.message);
