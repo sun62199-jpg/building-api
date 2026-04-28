@@ -12,7 +12,7 @@ const { JUSO_KEY, MOLIT_KEY, ELEVATOR_KEY } = process.env;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
-// 1. 승강기 데이터 수집
+// 1. 승강기 데이터 수집 (기존 유지)
 async function getElevatorData(elevatorNo) {
     const url = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorViewM?serviceKey=${ELEVATOR_KEY}&elevator_no=${elevatorNo}&_type=json`;
     try {
@@ -21,6 +21,7 @@ async function getElevatorData(elevatorNo) {
         const item = data.response?.body?.item;
         if (!item) return null;
 
+        // 같은 건물 내 모든 승강기 확인 (피난용 및 최고층 파악용)
         const listUrl = `https://apis.data.go.kr/B553664/ElevatorInformationService/getElevatorListM?serviceKey=${ELEVATOR_KEY}&sido=${encodeURIComponent(item.address1.split(' ')[0])}&sigungu=${encodeURIComponent(item.address1.split(' ')[1])}&buld_nm=${encodeURIComponent(item.buldNm)}&_type=json`;
         const listRes = await fetch(listUrl);
         const listData = await listRes.json();
@@ -35,7 +36,7 @@ async function getElevatorData(elevatorNo) {
     } catch (e) { return null; }
 }
 
-// 2. 건축물대장 데이터 수집 (주용도 + 부용도 정밀 체크)
+// 2. 건축물대장 데이터 수집 (필지 내 모든 건물 통합 조회)
 async function getBuildingData(address) {
     if (!address) return null;
     const jusoUrl = `https://business.juso.go.kr/addrlink/addrLinkApi.do?confmKey=${JUSO_KEY}&keyword=${encodeURIComponent(address)}&resultType=json`;
@@ -44,35 +45,48 @@ async function getBuildingData(address) {
     const juso = dataJuso.results?.juso?.[0];
     if (!juso) return null;
 
-    const molitUrl = `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo?serviceKey=${MOLIT_KEY}&sigunguCd=${juso.admCd.substring(0, 5)}&bjdongCd=${juso.admCd.substring(5, 10)}&bun=${juso.lnbrMnnm.padStart(4, '0')}&ji=${juso.lnbrSlno.padStart(4, '0')}&_type=json`;
+    // numOfRows=100을 추가하여 지번 내 모든 동을 가져옴
+    const molitUrl = `https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo?serviceKey=${MOLIT_KEY}&sigunguCd=${juso.admCd.substring(0, 5)}&bjdongCd=${juso.admCd.substring(5, 10)}&bun=${juso.lnbrMnnm.padStart(4, '0')}&ji=${juso.lnbrSlno.padStart(4, '0')}&_type=json&numOfRows=100`;
     const resMolit = await fetch(molitUrl);
     const dataMolit = await resMolit.json();
     const items = dataMolit.response?.body?.items?.item || [];
     const itemList = Array.isArray(items) ? items : [items];
 
-    // 다중이용시설 판단 키워드
     const targetKeywords = ["문화및집회", "종교", "판매", "운수", "의료", "숙박"];
     
-    let gaMokAreaSum = 0;
-    let maxFloor = 0;
-    let regstrGbCd = "1";
+    let gaMokAreaSum = 0; // 6개 용도 합계
+    let complexMaxFloor = 0; // 단지 내 최고층
+    let isCollective = "NO";
+    let representativeTotArea = 0; // 법정필수용 (가장 큰 동 기준)
 
     itemList.forEach(it => {
         const mainPurpose = it.mainPurpsCdNm || "";
-        const etcPurpose = it.etcPurps || ""; // 부용도/기타용도 필드
+        const etcPurpose = it.etcPurps || "";
+        const floor = Number(it.grndFlrCnt || 0);
+        const area = Number(it.totArea || 0);
 
-        // 주용도나 기타용도에 키워드가 포함되어 있는지 체크
-        const isTarget = targetKeywords.some(kw => mainPurpose.includes(kw) || etcPurpose.includes(kw));
+        // 1. 단지 내 최고층 갱신
+        if (floor > complexMaxFloor) complexMaxFloor = floor;
+        
+        // 2. 가장 큰 동 면적 (법정필수 판단용)
+        if (area > representativeTotArea) representativeTotArea = area;
 
-        if (isTarget) {
-            gaMokAreaSum += Number(it.totArea || 0);
+        // 3. 다중이용 가목(6개 용도) 면적 합산
+        const isTargetUsage = targetKeywords.some(kw => mainPurpose.includes(kw) || etcPurpose.includes(kw));
+        if (isTargetUsage) {
+            gaMokAreaSum += area;
         }
 
-        if (Number(it.grndFlrCnt) > maxFloor) maxFloor = Number(it.grndFlrCnt);
-        regstrGbCd = it.regstrGbCd; 
+        // 4. 집합건물 여부
+        if (it.regstrGbCd === "2") isCollective = "YES";
     });
 
-    return { gaMokAreaSum, maxFloor, regstrGbCd, totArea: itemList[0]?.totArea || 0 };
+    return { 
+        gaMokAreaSum, 
+        maxFloor: complexMaxFloor, 
+        isCollective, 
+        representativeTotArea 
+    };
 }
 
 app.post("/api/summary", async (req, res) => {
@@ -83,29 +97,43 @@ app.post("/api/summary", async (req, res) => {
 
         const blData = await getBuildingData(evData.base.address1);
 
-        // 판정 로직
+        // --- 정밀 판정 로직 ---
         let multiType = "일반건축물";
         const finalMaxFloor = Math.max(evData.maxFloor, blData?.maxFloor || 0);
         const finalGaMokArea = blData?.gaMokAreaSum || 0;
         
-        if (evData.hasEvac) multiType = "피난용건축물";
-        else if (finalMaxFloor >= 16 || finalGaMokArea >= 5000) multiType = "다중이용건축물";
+        // 1순위: 피난용 승강기 여부
+        if (evData.hasEvac) {
+            multiType = "피난용건축물";
+        } 
+        // 2순위: 다중이용 나목 (용도 상관없이 16층 이상)
+        else if (finalMaxFloor >= 16) {
+            multiType = "다중이용(나목-16층이상)";
+        } 
+        // 3순위: 다중이용 가목 (6개 용도 합계 5,000㎡ 이상)
+        else if (finalGaMokArea >= 5000) {
+            multiType = "다중이용(가목-5천㎡이상)";
+        }
 
-        const isCollective = blData?.regstrGbCd === "2" ? "YES" : "NO";
-        const isMandatory = (finalMaxFloor >= 6 && Number(blData?.totArea || 0) >= 2000) || finalMaxFloor >= 11 ? "YES" : "NO";
+        // 법정필수 판정 (최고 층수 11층 이상 혹은 6층이상&2000㎡)
+        const isMandatory = (finalMaxFloor >= 11 || (finalMaxFloor >= 6 && (blData?.representativeTotArea || 0) >= 2000)) ? "YES" : "NO";
 
-        // 주소 1과 주소 2를 합쳐서 더 풍부하게 보여줌
+        // 주소 출력 최적화: 지번 (도로명)
         const combinedAddress = `${evData.base.address2 || ''} (${evData.base.address1 || ''})`.trim();
 
         res.json({
             buldNm: evData.base.buldNm || '이름 없는 건물',
             address: combinedAddress,
             multiType,
-            isCollective,
+            isCollective: blData?.isCollective || "NO",
             isMandatory,
-            info: { floor: finalMaxFloor, area: finalGaMokArea }
+            info: { 
+                floor: finalMaxFloor, 
+                area: Math.round(finalGaMokArea) 
+            }
         });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: "서버 내부 오류" });
     }
 });
